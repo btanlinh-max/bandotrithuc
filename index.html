@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>AI Learning Map – Bản đồ tri thức của riêng em</title>
+<meta name="description" content="Lớp học trực tuyến: AI soạn bài tập mới từ kiến thức sách giáo khoa, học sinh nộp bài, AI chấm nháp, cô duyệt và trả bài; mỗi em có bản đồ tri thức của riêng mình.">
+<meta name="theme-color" content="#1F6F8B">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Mali:wght@500;600;700&family=Quicksand:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#FBF4E4; --paper:#FFFDF7; --ink:#2B2A33; --muted:#6E6A5E; --line:#E8DDC4;
+  --sea:#1F6F8B; --sea-2:#DCEFF3; --sea-3:#0F4C63; --sun:#F2A23A; --sun-2:#FFF0D6;
+  --leaf:#3E9B5F; --leaf-2:#E2F3E7; --berry:#D2544B; --berry-2:#FBE4E1; --lock:#CFC6B2;
+  --r:18px; --shadow:0 2px 0 rgba(43,42,51,.06),0 8px 24px rgba(43,42,51,.06);
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--ink);font:500 16px/1.5 Quicksand,system-ui,sans-serif;min-height:100vh;
+  background-image:radial-gradient(rgba(31,111,139,.07) 1px,transparent 1px);background-size:22px 22px}
+h1,h2,h3,.hand{font-family:Mali,Quicksand,cursive;line-height:1.25;margin:0 0 .4em}
+h1{font-size:28px} h2{font-size:22px} h3{font-size:18px}
+a{color:var(--sea)}
+button,input,select,textarea{font:inherit;color:inherit}
+.wrap{max-width:1100px;margin:0 auto;padding:16px}
+.narrow{max-width:620px;margin:0 auto}
+.card{background:var(--paper);border:1.5px solid var(--line);border-radius:var(--r);padding:16px;box-shadow:var(--shadow);margin-bottom:14px}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.between{justify-content:space-between}
+.grow{flex:1}
+.muted{color:var(--muted)} .small{font-size:14px} .tiny{font-size:12.5px}
+.btn{border:1.5px solid var(--line);background:#fff;border-radius:999px;padding:9px 16px;cursor:pointer;font-weight:700;display:inline-flex;gap:6px;align-items:center;text-decoration:none;color:var(--ink)}
+.btn:hover{border-color:var(--sea)}
+.btn.primary{background:var(--sea);border-color:var(--sea);color:#fff}
+.btn.sun{background:var(--sun);border-color:var(--sun);color:#3a2500}
+.btn.leaf{background:var(--leaf);border-color:var(--leaf);color:#fff}
+.btn.ghost{background:transparent}
+.btn.danger{color:var(--berry);border-color:var(--berry-2)}
+.btn.big{font-size:19px;padding:14px 22px}
+.btn:disabled{opacity:.55;cursor:wait}
+.chip{display:inline-flex;align-items:center;gap:4px;border-radius:999px;padding:2px 10px;font-size:13px;font-weight:700;background:var(--sea-2);color:var(--sea-3)}
+.chip.sun{background:var(--sun-2);color:#8a5200} .chip.leaf{background:var(--leaf-2);color:#1f6b3a} .chip.berry{background:var(--berry-2);color:#9b2c25} .chip.grey{background:#EEE8DA;color:#6E6A5E}
+input[type=text],input[type=password],input[type=number],input[type=date],input[type=url],select,textarea{width:100%;border:1.5px solid var(--line);border-radius:12px;padding:9px 12px;background:#fff}
+textarea{resize:vertical}
+input:focus,select:focus,textarea:focus{outline:3px solid rgba(31,111,139,.2);border-color:var(--sea)}
+label.f{display:block;font-weight:700;font-size:14px;margin:8px 0 4px}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px}
+.grid3{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px}
+.hidden{display:none!important}
+#toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);background:var(--ink);color:#fff;padding:10px 18px;border-radius:999px;font-weight:700;z-index:99;opacity:0;transition:.25s;pointer-events:none;max-width:90vw;text-align:center}
+#toast.on{opacity:1}
+.demo-bar{background:var(--sun-2);border-bottom:1.5px solid #F3D9A8;padding:6px 16px;font-size:14px;text-align:center}
+
+/* đầu trang */
+.top{display:flex;align-items:center;gap:12px;padding:12px 16px;max-width:1100px;margin:0 auto}
+.logo{display:flex;align-items:center;gap:10px;font-family:Mali;font-weight:700;color:var(--sea-3);text-decoration:none}
+.logo .mark{width:40px;height:40px;border-radius:12px;background:var(--sea);display:grid;place-items:center;color:#fff;font-size:22px;box-shadow:inset 0 -3px 0 rgba(0,0,0,.15)}
+.logo small{display:block;font-family:Quicksand;font-weight:600;color:var(--muted);font-size:12px;letter-spacing:.02em}
+.me{margin-left:auto;display:flex;gap:8px;align-items:center}
+.ava{width:40px;height:40px;border-radius:50%;background:var(--sun-2);display:grid;place-items:center;font-size:24px;border:2px solid #fff;box-shadow:0 0 0 1.5px var(--line)}
+
+/* trang đầu */
+.hero{text-align:center;padding:28px 12px 8px}
+.hero h1{font-size:clamp(26px,5vw,40px);color:var(--sea-3)}
+.hero .sub{font-size:18px;color:var(--muted);max-width:560px;margin:0 auto 20px}
+.doors{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px;max-width:640px;margin:0 auto}
+.door{border:2px solid var(--line);background:var(--paper);border-radius:24px;padding:22px;cursor:pointer;text-align:center;box-shadow:var(--shadow)}
+.door:hover{border-color:var(--sea);transform:translateY(-2px)}
+.door .e{font-size:54px}
+.door b{display:block;font-family:Mali;font-size:21px}
+
+/* thanh mục của cô */
+.nav{display:flex;gap:6px;overflow-x:auto;padding:4px 16px 10px;max-width:1100px;margin:0 auto;scrollbar-width:none}
+.nav button{white-space:nowrap;border:1.5px solid var(--line);background:var(--paper);border-radius:999px;padding:8px 14px;font-weight:700;cursor:pointer;position:relative}
+.nav button.on{background:var(--sea);border-color:var(--sea);color:#fff}
+.nav .badge{background:var(--berry);color:#fff;border-radius:999px;font-size:11px;padding:0 6px;margin-left:4px}
+.tabs{display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap}
+.tabs button{border:1.5px solid var(--line);background:var(--paper);border-radius:999px;padding:7px 14px;font-weight:700;cursor:pointer}
+.tabs button.on{background:var(--sea-3);border-color:var(--sea-3);color:#fff}
+
+/* bản đồ */
+.map{max-width:620px;margin:0 auto}
+.island{background:linear-gradient(#FFFDF7,#FFF9EC);border:2px dashed #E0CFA6;border-radius:28px;padding:12px 10px 4px;margin:0 0 6px;position:relative}
+.island .ban{display:flex;align-items:center;gap:8px;justify-content:space-between;padding:0 6px}
+.island .ban b{font-family:Mali;font-size:17px;color:var(--sea-3)}
+.bridge{height:34px;width:4px;margin:0 auto;background:repeating-linear-gradient(var(--sea) 0 6px,transparent 6px 12px);border-radius:2px;opacity:.5}
+.map svg{width:100%;height:auto;display:block;overflow:visible}
+.node{cursor:pointer}
+.node:focus{outline:none}
+.node:focus circle.c, .node:hover circle.c{stroke-width:5}
+.legend{display:flex;gap:10px;flex-wrap:wrap;justify-content:center;margin:8px 0 14px;font-size:13.5px}
+.legend span{display:inline-flex;gap:5px;align-items:center}
+.dot{width:14px;height:14px;border-radius:50%;display:inline-block}
+@keyframes bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-5px)}}
+.here{animation:bob 1.6s ease-in-out infinite}
+@keyframes pulse{0%{r:30}70%{r:40;opacity:0}100%{r:40;opacity:0}}
+.ring{animation:pulse 1.8s ease-out infinite;fill:none;stroke:var(--sun);stroke-width:3}
+
+/* bài tập */
+.q{border:1.5px solid var(--line);border-radius:16px;padding:14px;background:#fff;margin-bottom:12px}
+.q .qh{display:flex;justify-content:space-between;gap:8px;align-items:center;margin-bottom:6px}
+.q .qt{font-size:18px;font-weight:600;white-space:pre-wrap}
+.opts{display:grid;gap:8px;margin-top:10px}
+.opt{border:2px solid var(--line);border-radius:14px;padding:10px 14px;background:#fff;text-align:left;cursor:pointer;font-size:17px;display:flex;gap:10px;align-items:center}
+.opt .k{width:30px;height:30px;border-radius:50%;background:var(--sea-2);display:grid;place-items:center;font-weight:700;flex:none}
+.opt.on{border-color:var(--sea);background:var(--sea-2)}
+.opt.ok{border-color:var(--leaf);background:var(--leaf-2)} .opt.no{border-color:var(--berry);background:var(--berry-2)}
+.tf{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px}
+.photo-in{margin-top:10px}
+.photo-in img{max-width:100%;border-radius:12px;border:1.5px solid var(--line);margin-top:8px;display:block}
+.prog{height:10px;background:#EFE6D2;border-radius:999px;overflow:hidden}
+.prog i{display:block;height:100%;background:var(--leaf);border-radius:999px;transition:.3s}
+.stars{font-size:44px;letter-spacing:6px}
+.stars .off{filter:grayscale(1);opacity:.25}
+.res{font-weight:700} .res.ok{color:var(--leaf)} .res.no{color:var(--berry)}
+.speak{border:none;background:var(--sun-2);border-radius:999px;padding:4px 10px;cursor:pointer;font-weight:700}
+
+/* cô soạn bài */
+.pages{display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:8px;margin-top:10px}
+.pg{border:2px solid var(--line);border-radius:10px;background:#fff;padding:4px;cursor:pointer;text-align:center;font-size:12px}
+.pg canvas{width:100%;height:auto;display:block;border-radius:6px;background:#f4f0e6;min-height:100px}
+.pg.on{border-color:var(--sun);background:var(--sun-2)}
+.qe{border:1.5px solid var(--line);border-left:6px solid var(--sea);border-radius:14px;padding:12px;background:#fff;margin-bottom:10px}
+.qe.l2{border-left-color:var(--sun)} .qe.l3{border-left-color:var(--berry)}
+.qe .opt-row{display:flex;gap:6px;align-items:center;margin-top:6px}
+.qe .opt-row input[type=radio]{width:20px;height:20px;flex:none}
+.spin{display:inline-block;width:16px;height:16px;border:2.5px solid currentColor;border-right-color:transparent;border-radius:50%;animation:sp .8s linear infinite;vertical-align:-3px}
+@keyframes sp{to{transform:rotate(360deg)}}
+table.t{width:100%;border-collapse:collapse;font-size:15px}
+table.t th,table.t td{border-bottom:1px solid var(--line);padding:8px 6px;text-align:left;vertical-align:middle}
+table.t th{font-size:13px;color:var(--muted);font-weight:700}
+.scroll{overflow-x:auto}
+.stat{background:var(--paper);border:1.5px solid var(--line);border-radius:16px;padding:12px 14px}
+.stat b{font-family:Mali;font-size:28px;color:var(--sea-3);display:block}
+.cham{display:grid;grid-template-columns:280px 1fr;gap:14px}
+.qlist button{display:flex;width:100%;text-align:left;gap:8px;align-items:center;border:1.5px solid var(--line);background:#fff;border-radius:12px;padding:8px 10px;margin-bottom:6px;cursor:pointer}
+.qlist button.on{border-color:var(--sea);background:var(--sea-2)}
+.aibox{background:#F4F8FF;border:1.5px dashed #9DBBE0;border-radius:12px;padding:8px 10px;margin-top:8px;font-size:14.5px}
+.pinpad{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;max-width:320px;margin:10px auto}
+.pinpad button{font-size:38px;border:2px solid var(--line);background:#fff;border-radius:18px;padding:10px 0;cursor:pointer}
+.pinpad button:active{transform:scale(.95)}
+.pins{display:flex;gap:10px;justify-content:center;margin:6px 0}
+.pins span{width:52px;height:52px;border-radius:14px;border:2px dashed var(--line);display:grid;place-items:center;font-size:30px;background:#fff}
+.kids{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:10px}
+.kid{border:2px solid var(--line);background:#fff;border-radius:18px;padding:12px 6px;cursor:pointer;text-align:center;font-weight:700}
+.kid .e{font-size:38px;display:block}
+.heat td.h{text-align:center;font-weight:700;border-radius:6px}
+.bar{display:flex;align-items:flex-end;gap:4px;height:90px;border-bottom:1.5px solid var(--line);padding-top:6px}
+.bar{justify-content:center}.bar i{flex:1;max-width:46px;background:var(--sea);border-radius:6px 6px 0 0;min-height:2px;position:relative}
+.bar i span{position:absolute;top:-18px;left:0;right:0;text-align:center;font-size:11px;font-style:normal;color:var(--muted)}
+.foot{max-width:1100px;margin:20px auto;padding:0 16px 30px;color:var(--muted);font-size:13px;text-align:center}
+@media (min-width:761px){.nav{flex-wrap:wrap}}
+@media (max-width:760px){.hide-sm{display:none}.cham{grid-template-columns:1fr}.cham .qlist{max-height:220px;overflow:auto}h1{font-size:24px}}
+@media print{.noprint{display:none!important}body{background:#fff}}
+</style>
+</head>
+<body>
+<div id="demobar" class="demo-bar hidden noprint"></div>
+<header class="top noprint" id="top"></header>
+<nav class="nav noprint hidden" id="nav"></nav>
+<main class="wrap" id="app"><p class="muted">Đang mở bản đồ…</p></main>
+<div class="foot noprint" id="foot">AI Learning Map – Bản đồ tri thức của riêng em · AI chỉ gợi ý, cô giáo duyệt và quyết định · Tên học sinh không gửi cho AI</div>
+<div id="toast"></div>
+<input type="file" id="filePick" class="hidden">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js"></script>
+<script src="config.js"></script>
+<script src="core.js"></script>
+<script src="demo.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,391 @@
+/* Bản Đồ Tri Thức – lõi xử lý dùng chung cho Google Apps Script (máy chủ của cô) và bản dùng thử trên trình duyệt.
+   Bộ chuyển (adapter) A cung cấp: all(bảng), put(bảng, bản ghi), del(bảng, id), secret(khóa[, giá trị]),
+   sign(chuỗi), hash(chuỗi), putFile(tên, base64), getFile(mã).
+   Hành động cần AI trả về {__ai: parts, json, then(text, err)}; nơi gọi tự chạy AI rồi gọi then. */
+var Core = (function () {
+  var DAY = 864e5;
+  function uid(p) { return p + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
+  function now() { return new Date().toISOString(); }
+  function stars(s) { return s >= 9 ? 3 : s >= 7 ? 2 : 1; }
+  function norm(v) {
+    return String(v == null ? "" : v).toLowerCase().normalize("NFC").replace(/\s+/g, " ").replace(/[.。]+$/, "").trim();
+  }
+  function numOrNull(v) { var s = String(v).replace(/\s/g, "").replace(",", "."); return /^-?\d+(\.\d+)?$/.test(s) ? Number(s) : null; }
+  function err(msg, code) { var e = new Error(msg); e.code = code || "loi"; return e; }
+  function extractJSON(t) {
+    t = String(t || "").replace(/```json|```/gi, "").trim();
+    var a = t.search(/[\[{]/); if (a < 0) throw err("AI trả lời không đúng dạng, cô thử lại nhé.");
+    var close = t[a] === "{" ? "}" : "]"; return JSON.parse(t.slice(a, t.lastIndexOf(close) + 1));
+  }
+  var AUTO_TYPES = { mcq: 1, tf: 1, fill: 1 };
+  var OPEN_TYPES = { short: 1, photo: 1 };
+  var AUTO_COMMENTS = [
+    [9, "Em làm rất tốt! Cô khen em, tiếp tục phát huy nhé."],
+    [7, "Em làm khá tốt. Xem lại những câu sai để lần sau đúng hết nhé."],
+    [5, "Em đã cố gắng. Em ôn lại bài và thử phần Ôn tập trên bản đồ nhé."],
+    [0, "Em đừng buồn, mình cùng ôn lại bài này nhé. Có chỗ nào chưa hiểu em hỏi cô."]
+  ];
+
+  function make(A) {
+    var cache = {};
+    function all(t) { if (!cache[t]) cache[t] = A.all(t) || []; return cache[t]; }
+    function put(t, r) { A.put(t, r); var a = all(t), i = a.findIndex(function (x) { return x.id === r.id; }); if (i < 0) a.push(r); else a[i] = r; return r; }
+    function del(t, id) { A.del(t, id); cache[t] = all(t).filter(function (x) { return x.id !== id; }); }
+    function get(t, id) { return all(t).find(function (x) { return x.id === id; }); }
+    function settings() { return get("settings", "main") || { id: "main" }; }
+    function log(type, data) { put("log", Object.assign({ id: uid("l"), t: now(), type: type }, data || {})); }
+
+    /* ---------- đăng nhập ---------- */
+    function token(role, sid) { var exp = Date.now() + 60 * DAY, body = role + "." + (sid || "-") + "." + exp; return body + "." + A.sign(body); }
+    function who(tok) {
+      var p = String(tok || "").split("."); if (p.length !== 4) return null;
+      var body = p.slice(0, 3).join("."); if (A.sign(body) !== p[3] || Number(p[2]) < Date.now()) return null;
+      if (p[0] === "S" && !get("students", p[1])) return null;
+      return { role: p[0], sid: p[1] };
+    }
+
+    /* ---------- tiện ích dữ liệu ---------- */
+    function visibleTo(a, sid) { return a.status === "giao" && (!a.target || a.target === "all" || a.target.indexOf(sid) >= 0); }
+    function subOf(aid, sid) { return all("subs").find(function (s) { return s.aid === aid && s.sid === sid; }); }
+    function totalPoints(a) { return a.questions.reduce(function (s, q) { return s + (Number(q.points) || 1); }, 0); }
+    function publicQ(q) {
+      var o = { id: q.id, type: q.type, text: q.text, points: q.points || 1, level: q.level };
+      if (q.options) o.options = q.options; return o;
+    }
+    function checkAuto(q, v) {
+      if (v == null || v === "") return false;
+      if (q.type === "mcq") return Number(v) === Number(q.answer);
+      if (q.type === "tf") return String(v) === String(q.answer);
+      var ok = String(q.answer).split("|").map(norm), n = numOrNull(v);
+      return ok.some(function (x) { var xn = numOrNull(x); return (n != null && xn != null) ? n === xn : norm(v) === x; });
+    }
+    function mastery(sid) {
+      var res = {};
+      all("lessons").forEach(function (l) { res[l.id] = "khoa"; });
+      var asgs = all("asgs").filter(function (a) { return visibleTo(a, sid) && a.lessonId; });
+      var scores = {};
+      asgs.forEach(function (a) {
+        if (res[a.lessonId] === "khoa") res[a.lessonId] = "mo";
+        var s = subOf(a.id, sid); if (!s) return;
+        if (s.status === "da_tra") (scores[a.lessonId] = scores[a.lessonId] || []).push(s.score10);
+        else res[a.lessonId] = "dang";
+      });
+      Object.keys(scores).forEach(function (lid) {
+        var arr = scores[lid], avg = arr.reduce(function (x, y) { return x + y; }, 0) / arr.length;
+        res[lid] = avg >= 8 ? "vung" : "dang";
+      });
+      // ôn tập đúng 5/5 hai lần thì cũng tính là vững
+      all("log").forEach(function (g) { if (g.type === "practice" && g.sid === sid && g.correct === g.total && g.total >= 5 && res[g.lessonId] === "dang") res[g.lessonId] = g.again ? "vung" : res[g.lessonId]; });
+      return res;
+    }
+    function studentView(s) { return { id: s.id, name: s.name, avatar: s.avatar }; }
+    function subSummary(s) {
+      var st = get("students", s.sid);
+      return { id: s.id, aid: s.aid, sid: s.sid, name: st ? st.name : "?", status: s.status, score10: s.score10, draft10: s.draft10, stars: s.stars, submittedAt: s.submittedAt, late: s.late };
+    }
+
+    /* ---------- AI: lời dặn ---------- */
+    function genPrompt(p, lessonTitle, subjectName) {
+      var n = p.n || { 1: 3, 2: 3, 3: 2 };
+      var types = (p.types && p.types.length ? p.types : ["mcq", "fill", "tf", "short"]);
+      return [
+        "Bạn là giáo viên tiểu học giỏi ở Việt Nam, đang soạn bài tập cho học sinh LỚP 3 (8–9 tuổi), theo Chương trình GDPT 2018.",
+        "Môn: " + subjectName + ". Bài: " + lessonTitle + ".",
+        "Tài liệu đính kèm là các trang sách giáo khoa của bài này" + (p.text ? " (kèm phần chữ trích ra)" : "") + ".",
+        "",
+        "YÊU CẦU QUAN TRỌNG NHẤT:",
+        "- KHÔNG chép lại bài tập, ví dụ, câu hỏi có sẵn trong sách. Chỉ dùng KIẾN THỨC và KĨ NĂNG của bài để tạo bài tập MỚI:",
+        "  đổi số liệu, đổi tình huống, đổi nhân vật, đổi ngữ liệu, nhưng giữ đúng yêu cầu cần đạt của bài.",
+        "- Không vượt quá kiến thức của bài và các bài trước đó (ví dụ: không dùng số lớn hơn phạm vi bài đang học).",
+        "- Tình huống gần gũi với học sinh Việt Nam: gia đình, trường lớp, chợ quê, sân trường, vườn nhà, ngày lễ." + (p.context ? " Gợi ý thêm của cô: " + p.context + "." : ""),
+        "- Câu chữ ngắn, rõ, dễ đọc với học sinh lớp 3. Tên người là tên Việt Nam thông dụng. Không có nội dung bạo lực, quảng cáo, thương hiệu.",
+        "- Đáp án phải chắc chắn đúng. Tự kiểm tra lại phép tính trước khi trả lời.",
+        "",
+        "Số câu theo mức (Thông tư 27): mức 1 (nhận biết, nhắc lại): " + (n[1] || 0) + " câu; mức 2 (hiểu, làm được): " + (n[2] || 0) + " câu; mức 3 (vận dụng vào tình huống mới): " + (n[3] || 0) + " câu.",
+        "Chỉ dùng các dạng câu: " + types.join(", ") + ".",
+        "  mcq = trắc nghiệm 4 lựa chọn (answer = số thứ tự đáp án đúng, bắt đầu từ 0);",
+        "  tf = đúng/sai (answer = true hoặc false);",
+        "  fill = điền đáp án ngắn (answer = đáp án; nếu chấp nhận nhiều cách viết thì ngăn bằng dấu |, ví dụ \"24|24 cái\");",
+        "  short = trả lời bằng câu/đoạn ngắn, cô chấm (answer = đáp án gợi ý; rubric = cách cho điểm);",
+        "  photo = làm vào vở rồi chụp ảnh nộp, dùng cho bài cần trình bày, đặt tính, viết đoạn (answer = lời giải mẫu; rubric = cách cho điểm).",
+        "",
+        "Trả về DUY NHẤT một mảng JSON, mỗi phần tử:",
+        "{\"type\":\"mcq|tf|fill|short|photo\",\"level\":1|2|3,\"text\":\"đề bài\",\"options\":[\"...\"] (chỉ với mcq),\"answer\":...,\"points\":1 hoặc 2,\"rubric\":\"...\" (với short/photo),\"explain\":\"giải thích ngắn cho học sinh khi xem lại bài\"}"
+      ].join("\n");
+    }
+    function tocPrompt(subjectName) {
+      return [
+        "Đây là các trang mục lục của sách giáo khoa " + subjectName + " lớp 3 ở Việt Nam.",
+        "Hãy liệt kê đúng thứ tự các chủ đề (hoặc tuần/chủ điểm) và các bài trong từng chủ đề, chỉ lấy tên, bỏ số trang.",
+        "Bỏ qua các mục không phải bài học (lời nói đầu, hướng dẫn sử dụng sách, bảng tra cứu).",
+        "Trả về DUY NHẤT JSON dạng: [{\"topic\":\"tên chủ đề\",\"title\":\"tên bài\"}, ...]"
+      ].join("\n");
+    }
+    function gradePrompt(items) {
+      return [
+        "Bạn giúp cô giáo lớp 3 CHẤM NHÁP bài làm của một học sinh. Cô sẽ xem lại và quyết định điểm cuối cùng.",
+        "Với mỗi câu, so bài làm với đáp án gợi ý và cách cho điểm. Chấm công bằng, không khắt khe chính tả nhỏ nếu không phải bài chính tả.",
+        "Nếu ảnh mờ, không đọc được hoặc không phải bài làm, cho score = null và ghi rõ trong note.",
+        "comment: lời nhận xét gửi học sinh, tối đa 25 chữ, giọng cô giáo ấm áp, xưng \"cô\" gọi \"em\", chỉ ra 1 điểm tốt và 1 điều cần sửa (nếu có).",
+        "note: ghi chú ngắn cho cô (ví dụ: em sai bước nào).",
+        "Câu hỏi và bài làm (ảnh đính kèm theo đúng thứ tự các câu có \"photo\": true):",
+        JSON.stringify(items),
+        "",
+        "Trả về DUY NHẤT JSON: {\"items\":[{\"qid\":\"...\",\"score\":số hoặc null,\"comment\":\"...\",\"note\":\"...\"}],\"overall\":\"lời nhận xét chung cho cả bài, tối đa 35 chữ, xưng cô – em\"}"
+      ].join("\n");
+    }
+    function imgParts(list) { return (list || []).filter(Boolean).map(function (b) { return { inline_data: { mime_type: "image/jpeg", data: String(b).replace(/^data:image\/\w+;base64,/, "") } }; }); }
+    function cleanQ(q, i) {
+      var t = ["mcq", "tf", "fill", "short", "photo"].indexOf(q.type) >= 0 ? q.type : "short";
+      var o = { id: uid("q") + i, type: t, level: [1, 2, 3].indexOf(Number(q.level)) >= 0 ? Number(q.level) : 1, text: String(q.text || "").trim(), points: Number(q.points) === 2 ? 2 : 1, explain: String(q.explain || ""), ai: true };
+      if (t === "mcq") { o.options = (q.options || []).map(String).slice(0, 4); o.answer = Math.max(0, Math.min(o.options.length - 1, Number(q.answer) || 0)); }
+      else if (t === "tf") o.answer = q.answer === true || String(q.answer).toLowerCase() === "true" || q.answer === "đúng";
+      else o.answer = String(q.answer == null ? "" : q.answer);
+      if (OPEN_TYPES[t]) o.rubric = String(q.rubric || "");
+      return o;
+    }
+    function subjectName(id) { var s = (settings().subjects || []).find(function (x) { return x.id === id; }); return s ? s.name : id; }
+
+    /* ---------- chấm ---------- */
+    function finishGrade(sub, a, parsed) {
+      var total = totalPoints(a), got = 0, pending = false;
+      a.questions.forEach(function (q) {
+        if (AUTO_TYPES[q.type]) { if (sub.auto[q.id]) got += Number(q.points) || 1; return; }
+        var r = parsed && parsed.items && parsed.items.find(function (x) { return x.qid === q.id; });
+        if (r) {
+          var sc = r.score == null ? null : Math.max(0, Math.min(Number(q.points) || 1, Number(r.score)));
+          sub.ai[q.id] = { score: sc, comment: String(r.comment || ""), note: String(r.note || "") };
+          if (sc == null) pending = true; else got += sc;
+        } else pending = true;
+      });
+      sub.draft10 = Math.round(got / total * 10);
+      sub.aiOverall = parsed && parsed.overall ? String(parsed.overall) : "";
+      sub.needCheck = pending;
+      return sub;
+    }
+
+    /* ---------- các hành động ---------- */
+    var H = {};
+    H.hello = function (p) {
+      var st = settings(), out = { className: st.className || "", teacherName: st.teacherName || "", school: st.school || "", needSetup: !A.secret("pw"), subjects: st.subjects || [] };
+      if (p.code && st.classCode && String(p.code).toUpperCase() === st.classCode) out.students = all("students").map(studentView);
+      else if (p.code) throw err("Mã lớp chưa đúng. Em hỏi lại cô nhé.");
+      return out;
+    };
+    H.init = function (p) {
+      if (A.secret("pw")) throw err("Lớp đã được cài đặt rồi.");
+      if (!p.password || String(p.password).length < 6) throw err("Mật khẩu cần ít nhất 6 kí tự.");
+      A.secret("pw", A.hash(p.password));
+      var code = "", abc = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; for (var i = 0; i < 6; i++) code += abc[Math.floor(Math.random() * abc.length)];
+      put("settings", { id: "main", className: p.className || "3A", teacherName: p.teacherName || "", school: p.school || "", classCode: code, autoReturn: true,
+        subjects: [{ id: "toan", name: "Toán" }, { id: "tv", name: "Tiếng Việt" }] });
+      log("init");
+      return { token: token("T") };
+    };
+    H.teacherLogin = function (p) { if (!A.secret("pw") || A.hash(p.password || "") !== A.secret("pw")) throw err("Mật khẩu chưa đúng."); return { token: token("T") }; };
+    H.studentLogin = function (p) {
+      var s = get("students", p.sid); if (!s) throw err("Không tìm thấy học sinh.");
+      if (String(p.pin) !== String(s.pin)) { log("pin_sai", { sid: s.id }); throw err("Mật khẩu hình chưa đúng, em thử lại nhé."); }
+      log("login", { sid: s.id }); return { token: token("S", s.id), student: studentView(s) };
+    };
+
+    /* học sinh */
+    H.home = function (p, me) {
+      var sid = me.sid, m = mastery(sid);
+      var asgs = all("asgs").filter(function (a) { return visibleTo(a, sid); }).map(function (a) {
+        var s = subOf(a.id, sid);
+        return { id: a.id, title: a.title, subject: a.subject, lessonId: a.lessonId, due: a.due, count: a.questions.length, sub: s ? { status: s.status, stars: s.status === "da_tra" ? s.stars : null } : null };
+      }).sort(function (x, y) { return (y.due || "").localeCompare(x.due || ""); });
+      var st = settings();
+      return { student: studentView(get("students", sid)), lessons: all("lessons"), mastery: m, asgs: asgs, subjects: st.subjects || [], className: st.className, teacherName: st.teacherName,
+        starsTotal: all("subs").filter(function (s) { return s.sid === sid && s.status === "da_tra"; }).reduce(function (x, s) { return x + (s.stars || 0); }, 0) };
+    };
+    H.getAsg = function (p, me) {
+      var a = get("asgs", p.aid); if (!a || (me.role === "S" && !visibleTo(a, me.sid))) throw err("Không tìm thấy bài.");
+      var s = me.role === "S" ? subOf(a.id, me.sid) : null, out = { id: a.id, title: a.title, subject: a.subject, lessonId: a.lessonId, due: a.due, note: a.note || "" };
+      if (s && s.status === "da_tra") {
+        out.questions = a.questions; out.sub = { answers: s.answers, auto: s.auto, final: s.final || {}, score10: s.score10, stars: s.stars, comment: s.teacherComment, status: s.status };
+      } else {
+        out.questions = a.questions.map(publicQ); if (s) out.sub = { status: s.status, answers: s.answers };
+      }
+      return out;
+    };
+    H.submit = function (p, me) {
+      var a = get("asgs", p.aid); if (!a || !visibleTo(a, me.sid)) throw err("Không tìm thấy bài.");
+      var old = subOf(a.id, me.sid); if (old && old.status === "da_tra") throw err("Cô đã chấm bài này rồi.");
+      var answers = p.answers || {}, photos = {}, auto = {};
+      a.questions.forEach(function (q) {
+        if (q.type === "photo" && p.photos && p.photos[q.id]) photos[q.id] = A.putFile(a.id + "_" + me.sid + "_" + q.id + ".jpg", p.photos[q.id]);
+        if (AUTO_TYPES[q.type]) auto[q.id] = checkAuto(q, answers[q.id]);
+      });
+      var sub = { id: old ? old.id : uid("s"), aid: a.id, sid: me.sid, answers: answers, photos: photos, auto: auto, ai: {}, submittedAt: now(), status: "cho_duyet", late: !!(a.due && now().slice(0, 10) > a.due) };
+      var open = a.questions.filter(function (q) { return OPEN_TYPES[q.type]; });
+      log("submit", { sid: me.sid, aid: a.id });
+      function done(parsed, aiErr) {
+        finishGrade(sub, a, parsed);
+        if (aiErr) { sub.aiError = String(aiErr.message || aiErr); sub.needCheck = true; }
+        if (!open.length && settings().autoReturn !== false) {
+          sub.status = "da_tra"; sub.score10 = sub.draft10; sub.stars = stars(sub.score10); sub.reviewedAt = now(); sub.reviewer = "tu_dong";
+          sub.teacherComment = AUTO_COMMENTS.find(function (c) { return sub.score10 >= c[0]; })[1];
+          a.questions.forEach(function (q) { sub.final = sub.final || {}; sub.final[q.id] = sub.auto[q.id] ? (Number(q.points) || 1) : 0; });
+        }
+        put("subs", sub);
+        return { status: sub.status, stars: sub.stars || null, score10: sub.status === "da_tra" ? sub.score10 : null };
+      }
+      if (!open.length) return done(null);
+      put("subs", sub);
+      var items = [], imgs = [];
+      open.forEach(function (q) {
+        var it = { qid: q.id, type: q.type, de_bai: q.text, dap_an_goi_y: q.answer, cach_cho_diem: q.rubric || "", diem_toi_da: Number(q.points) || 1 };
+        if (q.type === "photo") { var b = p.photos && p.photos[q.id]; it.photo = !!b; if (b) imgs.push(b); it.bai_lam_chu = answers[q.id] || ""; }
+        else it.bai_lam = answers[q.id] || "(bỏ trống)";
+        items.push(it);
+      });
+      return { __ai: [{ text: gradePrompt(items) }].concat(imgParts(imgs)), json: true, then: function (text, e) {
+        var parsed = null; if (!e) { try { parsed = extractJSON(text); } catch (x) { e = x; } }
+        if (!e) log("ai_grade", { sid: me.sid, aid: a.id });
+        return done(parsed, e);
+      } };
+    };
+    H.practice = function (p, me) {
+      var pool = [];
+      all("asgs").filter(function (a) { return a.lessonId === p.lessonId && (me.role === "T" || visibleTo(a, me.sid)); })
+        .forEach(function (a) { a.questions.forEach(function (q) { if (AUTO_TYPES[q.type]) pool.push(q); }); });
+      for (var i = pool.length - 1; i > 0; i--) { var j = Math.floor(Math.random() * (i + 1)), t = pool[i]; pool[i] = pool[j]; pool[j] = t; }
+      return { questions: pool.slice(0, 5) };
+    };
+    H.practiceDone = function (p, me) {
+      var again = all("log").some(function (g) { return g.type === "practice" && g.sid === me.sid && g.lessonId === p.lessonId && g.correct === g.total && g.total >= 5; });
+      log("practice", { sid: me.sid, lessonId: p.lessonId, correct: Number(p.correct) || 0, total: Number(p.total) || 0, again: again });
+      return { ok: true };
+    };
+
+    /* cô giáo */
+    H.tHome = function () {
+      var st = settings();
+      return { settings: st, hasKey: !!A.secret("key"), students: all("students"), lessons: all("lessons"), asgs: all("asgs").map(function (a) {
+        var subs = all("subs").filter(function (s) { return s.aid === a.id; });
+        var target = !a.target || a.target === "all" ? all("students").length : a.target.length;
+        return Object.assign({}, a, { nSub: subs.length, nTarget: target, nWait: subs.filter(function (s) { return s.status === "cho_duyet"; }).length });
+      }), subs: all("subs").map(subSummary) };
+    };
+    H.saveSettings = function (p) {
+      var st = settings(), allowed = ["className", "teacherName", "school", "autoReturn", "subjects", "model"];
+      allowed.forEach(function (k) { if (p[k] !== undefined) st[k] = p[k]; });
+      if (p.newCode) { var code = "", abc = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; for (var i = 0; i < 6; i++) code += abc[Math.floor(Math.random() * abc.length)]; st.classCode = code; }
+      put("settings", st);
+      if (p.key !== undefined) A.secret("key", String(p.key).trim());
+      if (p.password) { if (String(p.password).length < 6) throw err("Mật khẩu cần ít nhất 6 kí tự."); A.secret("pw", A.hash(p.password)); }
+      return { settings: st, hasKey: !!A.secret("key") };
+    };
+    H.saveStudents = function (p) {
+      var keep = {};
+      (p.students || []).forEach(function (s, i) {
+        if (!s.name || !String(s.name).trim()) return;
+        var old = s.id && get("students", s.id);
+        var rec = { id: old ? old.id : uid("hs"), name: String(s.name).trim(), avatar: s.avatar || "🙂", pin: /^\d{4}$/.test(String(s.pin || "")) ? String(s.pin) : (old ? old.pin : String(1000 + Math.floor(Math.random() * 8999)).replace(/9/g, "8")), order: i };
+        keep[rec.id] = 1; put("students", rec);
+      });
+      all("students").slice().forEach(function (s) { if (!keep[s.id]) del("students", s.id); });
+      return { students: all("students") };
+    };
+    H.saveLessons = function (p) {
+      var keep = {};
+      (p.lessons || []).forEach(function (l, i) {
+        if (!l.title) return;
+        var rec = { id: l.id || uid("b"), subject: l.subject, topic: String(l.topic || "").trim(), title: String(l.title).trim(), order: i };
+        keep[rec.id] = 1; put("lessons", rec);
+      });
+      all("lessons").slice().forEach(function (l) { if (!keep[l.id] && (!p.subject || l.subject === p.subject)) del("lessons", l.id); });
+      return { lessons: all("lessons") };
+    };
+    H.aiToc = function (p) {
+      return { __ai: [{ text: tocPrompt(subjectName(p.subject)) + (p.text ? "\n\nChữ trích từ trang mục lục:\n" + String(p.text).slice(0, 8000) : "") }].concat(imgParts(p.images)), json: true,
+        then: function (text, e) { if (e) throw e; var arr = extractJSON(text); log("ai_toc", { subject: p.subject, n: arr.length });
+          return { lessons: arr.filter(function (x) { return x && x.title; }).map(function (x) { return { subject: p.subject, topic: String(x.topic || ""), title: String(x.title) }; }) }; } };
+    };
+    H.aiGen = function (p) {
+      var l = get("lessons", p.lessonId), title = l ? l.title + (l.topic ? " (chủ đề: " + l.topic + ")" : "") : (p.lessonTitle || "");
+      var prompt = genPrompt(p, title, subjectName(p.subject || (l && l.subject)));
+      if (p.text) prompt += "\n\nChữ trích từ các trang sách (để hiểu kiến thức, KHÔNG chép bài tập):\n" + String(p.text).slice(0, 12000);
+      return { __ai: [{ text: prompt }].concat(imgParts(p.images)), json: true, then: function (text, e) {
+        if (e) throw e; var arr = extractJSON(text); if (!Array.isArray(arr)) arr = arr.questions || [];
+        var qs = arr.map(cleanQ).filter(function (q) { return q.text && (q.type !== "mcq" || q.options.length >= 2); });
+        log("ai_gen", { lessonId: p.lessonId, n: qs.length });
+        return { questions: qs };
+      } };
+    };
+    H.saveAsg = function (p) {
+      var a = p.asg || {}; if (!a.title) throw err("Bài cần có tên.");
+      if (!a.questions || !a.questions.length) throw err("Bài cần ít nhất 1 câu hỏi.");
+      var old = a.id && get("asgs", a.id);
+      var rec = { id: old ? old.id : uid("a"), title: String(a.title), subject: a.subject, lessonId: a.lessonId || "", due: a.due || "", note: a.note || "", target: a.target || "all",
+        status: a.status === "nhap" ? "nhap" : "giao", createdAt: old ? old.createdAt : now(), questions: a.questions.map(function (q) {
+          var o = Object.assign({}, q); o.id = o.id || uid("q"); o.points = Number(o.points) || 1; return o; }) };
+      if (rec.status === "giao" && (!old || old.status !== "giao")) { rec.givenAt = now(); log("assign", { aid: rec.id, nq: rec.questions.length, nAi: rec.questions.filter(function (q) { return q.ai; }).length, nEdited: rec.questions.filter(function (q) { return q.ai && q.edited; }).length }); }
+      put("asgs", rec); return { asg: rec };
+    };
+    H.delAsg = function (p) { all("subs").filter(function (s) { return s.aid === p.aid; }).forEach(function (s) { del("subs", s.id); }); del("asgs", p.aid); return { ok: true }; };
+    H.getSub = function (p) {
+      var s = get("subs", p.id); if (!s) throw err("Không tìm thấy bài nộp.");
+      var a = get("asgs", s.aid), st = get("students", s.sid), photos = {};
+      Object.keys(s.photos || {}).forEach(function (k) { try { photos[k] = A.getFile(s.photos[k]); } catch (e) { photos[k] = null; } });
+      return { sub: s, asg: a, student: st ? studentView(st) : null, photos: photos };
+    };
+    H.review = function (p) {
+      var s = get("subs", p.id); if (!s) throw err("Không tìm thấy bài nộp.");
+      if (p.action === "redo") { del("subs", s.id); log("redo", { aid: s.aid, sid: s.sid }); return { ok: true }; }
+      var score = Math.max(0, Math.min(10, Math.round(Number(p.score10))));
+      s.final = p.final || {}; s.score10 = score; s.stars = stars(score); s.teacherComment = String(p.comment || "");
+      s.status = "da_tra"; s.reviewedAt = now(); s.reviewer = "co";
+      var changed = s.draft10 != null && s.draft10 !== score;
+      put("subs", s);
+      log("review", { aid: s.aid, sid: s.sid, ms: Math.max(0, Math.min(30 * 60e3, Number(p.ms) || 0)), aiDraft: s.draft10, final: score, changed: changed, usedAiComment: !!p.usedAiComment });
+      return { ok: true };
+    };
+    H.regrade = function (p) {
+      var s = get("subs", p.id), a = s && get("asgs", s.aid); if (!s || !a) throw err("Không tìm thấy bài nộp.");
+      var items = [], imgs = [];
+      a.questions.filter(function (q) { return OPEN_TYPES[q.type]; }).forEach(function (q) {
+        var it = { qid: q.id, type: q.type, de_bai: q.text, dap_an_goi_y: q.answer, cach_cho_diem: q.rubric || "", diem_toi_da: Number(q.points) || 1 };
+        if (q.type === "photo") { var b = s.photos && s.photos[q.id] ? A.getFile(s.photos[q.id]) : null; it.photo = !!b; if (b) imgs.push(b); } else it.bai_lam = (s.answers || {})[q.id] || "(bỏ trống)";
+        items.push(it);
+      });
+      if (!items.length) throw err("Bài này không có câu cần AI chấm.");
+      return { __ai: [{ text: gradePrompt(items) }].concat(imgParts(imgs)), json: true, then: function (text, e) {
+        if (e) throw e; finishGrade(s, a, extractJSON(text)); delete s.aiError; put("subs", s); log("ai_grade", { sid: s.sid, aid: a.id }); return { sub: s }; } };
+    };
+    H.stats = function () {
+      var L = all("log"), cnt = function (t) { return L.filter(function (g) { return g.type === t; }); };
+      var rev = cnt("review"), gens = cnt("ai_gen"), asg = cnt("assign"), subs = all("subs");
+      var asgs = all("asgs").filter(function (a) { return a.status === "giao"; });
+      var expected = asgs.reduce(function (x, a) { return x + (!a.target || a.target === "all" ? all("students").length : a.target.length); }, 0);
+      var days = {}; L.forEach(function (g) { if (g.type === "submit" || g.type === "practice") days[g.t.slice(0, 10)] = (days[g.t.slice(0, 10)] || 0) + 1; });
+      var withMs = rev.filter(function (r) { return r.ms > 0; });
+      var first = L.length ? L.reduce(function (m, g) { return g.t < m ? g.t : m; }, L[0].t) : null;
+      return {
+        since: first, students: all("students").length, lessons: all("lessons").length,
+        aiGenCalls: gens.length, aiQuestions: gens.reduce(function (x, g) { return x + (g.n || 0); }, 0),
+        assigned: asg.length, questionsAssigned: asg.reduce(function (x, g) { return x + (g.nq || 0); }, 0), questionsFromAi: asg.reduce(function (x, g) { return x + (g.nAi || 0); }, 0),
+        questionsEdited: asg.reduce(function (x, g) { return x + (g.nEdited || 0); }, 0),
+        submissions: subs.length, expected: expected, onTime: subs.filter(function (s) { return !s.late; }).length,
+        autoReturned: subs.filter(function (s) { return s.reviewer === "tu_dong"; }).length,
+        aiGraded: cnt("ai_grade").length, reviewed: rev.length, reviewChanged: rev.filter(function (r) { return r.changed; }).length,
+        avgReviewSec: withMs.length ? Math.round(withMs.reduce(function (x, r) { return x + r.ms; }, 0) / withMs.length / 1000) : null,
+        practices: cnt("practice").length, logins: cnt("login").length, activeDays: days
+      };
+    };
+    H.exportAll = function () { return { settings: settings(), students: all("students"), lessons: all("lessons"), asgs: all("asgs"), subs: all("subs").map(function (s) { var o = Object.assign({}, s); delete o.photos; return o; }) }; };
+
+    var ROLE = { hello: "", init: "", teacherLogin: "", studentLogin: "", home: "S", getAsg: "*", submit: "S", practice: "*", practiceDone: "S" };
+    function handle(action, payload, tok) {
+      var h = H[action]; if (!h) throw err("Không có chức năng " + action);
+      var need = ROLE.hasOwnProperty(action) ? ROLE[action] : "T", me = who(tok);
+      if (need && (!me || (need !== "*" && me.role !== need))) throw err(me ? "Không có quyền." : "Phiên đăng nhập đã hết, vui lòng đăng nhập lại.", "auth");
+      return h(payload || {}, me);
+    }
+    return { handle: handle, aiKey: function () { return A.secret("key"); }, model: function () { return settings().model || ""; } };
+  }
+  return { make: make, extractJSON: extractJSON, stars: stars };
+})();
+if (typeof module !== "undefined") module.exports = Core;
