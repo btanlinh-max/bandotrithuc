@@ -19,7 +19,8 @@ const STATE = {
   vung: { name: "Đã vững", fill: "#E2F3E7", stroke: "#3E9B5F", icon: "⭐" }
 };
 
-let API = LS.get("api", "") || (window.BDTT_CONFIG && window.BDTT_CONFIG.api) || "";
+const CFG_API = (window.BDTT_CONFIG && window.BDTT_CONFIG.api) || "";
+let API = LS.get("demo", false) ? "" : (LS.get("api", "") || CFG_API);
 let SESSION = LS.get("session", null);
 let CLASS_CODE = LS.get("code", "");
 let TD = null;           // dữ liệu cô
@@ -29,9 +30,9 @@ let HOME = null;         // dữ liệu học sinh
 /* ---------- link lớp: #lop=MÃ&may=… ---------- */
 (function readHash() {
   const h = new URLSearchParams(location.hash.slice(1));
-  if (h.get("may")) { try { const u = atob(h.get("may").replace(/-/g, "+").replace(/_/g, "/")); if (/^https:\/\/script\.google(usercontent)?\.com\//.test(u)) { API = u; LS.set("api", u); } } catch (e) {} }
+  if (h.get("may")) { try { const u = atob(h.get("may").replace(/-/g, "+").replace(/_/g, "/")); if (/^https:\/\/script\.google(usercontent)?\.com\//.test(u)) { API = u; LS.set("api", u); LS.set("demo", false); } } catch (e) {} }
   if (h.get("lop")) { CLASS_CODE = h.get("lop").toUpperCase(); LS.set("code", CLASS_CODE); }
-  if (h.get("demo") != null) { API = ""; LS.set("api", ""); }
+  if (h.get("demo") != null) { API = ""; LS.set("demo", true); setSession(null); }
   if (h.get("lop") || h.get("may")) history.replaceState(null, "", location.pathname);
 })();
 function classLink() {
@@ -83,7 +84,8 @@ function speak(text) {
 /* ---------- khung trang ---------- */
 function frame({ nav = false } = {}) {
   $("#demobar").classList.toggle("hidden", !!API);
-  $("#demobar").innerHTML = `Bản dùng thử: dữ liệu mẫu chỉ lưu trên máy này. Mã lớp <b>DEMO3A</b> · mật khẩu hình của các em: 🐱🐰🦊🐼 · mật khẩu cô: <b>demo123</b>`;
+  $("#demobar").innerHTML = `Bản dùng thử: dữ liệu mẫu chỉ lưu trên máy này. Mã lớp <b>DEMO3A</b> · mật khẩu hình của các em: 🐱🐰🦊🐼 · mật khẩu cô: <b>demo123</b>${CFG_API ? ' · <a href="#" id="exitDemo">Thoát bản dùng thử</a>' : ""}`;
+  const xd = $("#exitDemo"); if (xd) xd.onclick = e => { e.preventDefault(); LS.set("demo", false); setSession(null); location.reload(); };
   const me = SESSION ? `<span class="ava">${esc(SESSION.avatar || "👩‍🏫")}</span><span class="small hide-sm"><b>${esc(SESSION.name || "")}</b></span><button class="btn ghost small" id="outBtn">Thoát</button>` : "";
   $("#top").innerHTML = `<a class="logo" href="#" id="homeLink"><span class="mark">🗺️</span><span>AI Learning Map<small>Bản đồ tri thức của riêng em</small></span></a><div class="me">${me}</div>`;
   $("#homeLink").onclick = e => { e.preventDefault(); route(); };
@@ -357,8 +359,8 @@ function serverBox() {
 }
 function bindServerBox() {
   const s = $("#srvSave"); if (!s) return;
-  s.onclick = () => { const v = $("#srv").value.trim(); if (!/^https:\/\/script\.google\.com\/macros\/s\/.+\/exec$/.test(v)) return toast("Link cần có dạng https://script.google.com/macros/s/…/exec"); API = v; LS.set("api", v); setSession(null); toast("Đã lưu link máy chủ."); tLogin(); };
-  $("#srvDemo").onclick = () => { API = ""; LS.set("api", ""); setSession(null); tLogin(); };
+  s.onclick = () => { const v = $("#srv").value.trim(); if (!/^https:\/\/script\.google\.com\/macros\/s\/.+\/exec$/.test(v)) return toast("Link cần có dạng https://script.google.com/macros/s/…/exec"); API = v; LS.set("api", v); LS.set("demo", false); setSession(null); toast("Đã lưu link máy chủ."); tLogin(); };
+  $("#srvDemo").onclick = () => { API = ""; LS.set("demo", true); setSession(null); tLogin(); };
 }
 function tSetup() {
   app().innerHTML = `<div class="narrow card"><h2>Chào cô! Cài đặt lớp lần đầu</h2><p class="muted small">Chỉ làm một lần. Mật khẩu này để cô vào phần quản lí lớp.</p>
