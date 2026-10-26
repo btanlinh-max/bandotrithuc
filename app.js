@@ -446,7 +446,7 @@ function tBando() {
       const { images, text } = await picker.extract(pages);
       const r = await api("aiToc", { subject: BSUBJ, images, text });
       if (!r.lessons.length) throw new Error("AI chưa đọc được mục lục, cô thử chọn lại trang.");
-      if (!rows.length || confirm(`AI tìm được ${r.lessons.length} bài. Thay danh sách hiện tại bằng danh sách mới? (Bấm Hủy để thêm vào cuối)`)) rows = r.lessons; else rows = rows.concat(r.lessons);
+      if (!rows.length || !confirm(`AI tìm được ${r.lessons.length} bài.\nBấm OK để THÊM vào cuối danh sách hiện tại (ví dụ đọc mục lục tập 2).\nBấm Hủy để THAY toàn bộ danh sách.`)) rows = r.lessons; else rows = rows.concat(r.lessons);
       draw(); toast("AI đã đọc xong mục lục. Cô xem lại rồi bấm Lưu bản đồ.");
     }, "AI đang đọc mục lục…");
   };
@@ -461,31 +461,65 @@ const BookDB = {
 };
 const pdfCache = {};
 async function openPdf(buf) { if (window.pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js"; return pdfjsLib.getDocument({ data: buf }).promise; }
+/* Mỗi môn có thể có nhiều quyển (tập 1, tập 2…): danh sách lưu ở "list_<môn>", từng quyển ở "bk_<mã>" */
+async function bookList(subject) {
+  let list = await BookDB.get("list_" + subject);
+  if (!list) {
+    list = []; const old = await BookDB.get("book_" + subject);
+    if (old) { const id = subject + "_" + Date.now().toString(36); await BookDB.set("bk_" + id, old); list.push({ id, name: old.name }); }
+    await BookDB.set("list_" + subject, list);
+  }
+  return list;
+}
+function bookLabel(n) { const m = String(n).match(/t[aậ]p\s*(\d)/i); return (m ? "Tập " + m[1] + " · " : "") + String(n).replace(/\.pdf$/i, ""); }
 function pdfPicker(el, subject, maxSel) {
-  let doc = null, name = "", start = 1, sel = [];
+  let doc = null, cur = null, list = [], start = 1, sel = [];
   const PER = 12;
-  async function load(buf, nm) { doc = await openPdf(buf.slice(0)); name = nm; pdfCache[subject] = { doc, name }; draw(); }
-  async function thumb(n, canvas) { const p = await doc.getPage(n), v = p.getViewport({ scale: 1 }), k = 180 / v.width, vp = p.getViewport({ scale: k }); canvas.width = vp.width; canvas.height = vp.height; await p.render({ canvasContext: canvas.getContext("2d"), viewport: vp }).promise; }
+  async function open(id) {
+    sel = []; start = 1; cur = id; LS.set("curbook_" + subject, id);
+    if (pdfCache[id]) { doc = pdfCache[id]; return draw(); }
+    el.innerHTML = `<p class="small"><span class="spin"></span> Đang mở sách…</p>`;
+    try { const b = await BookDB.get("bk_" + id); doc = await openPdf(b.buf.slice(0)); pdfCache[id] = doc; } catch (e) { doc = null; toast("Không mở được quyển sách này."); }
+    draw();
+  }
+  async function thumb(n, canvas) { const d = doc, p = await d.getPage(n), v = p.getViewport({ scale: 1 }), k = 180 / v.width, vp = p.getViewport({ scale: k }); canvas.width = vp.width; canvas.height = vp.height; await p.render({ canvasContext: canvas.getContext("2d"), viewport: vp }).promise; }
+  function shelf() {
+    return `<div class="row">${list.map(b => `<button class="btn small ${b.id === cur ? "primary" : ""}" data-bk="${esc(b.id)}" title="${esc(b.name)}">📗 ${esc(bookLabel(b.name))}</button>`).join("")}
+      <button class="btn small ghost" data-up>+ Thêm sách</button>${cur ? `<button class="btn small ghost danger" data-rm title="Chỉ xóa khỏi máy này">Bỏ quyển này</button>` : ""}</div>`;
+  }
   function draw() {
-    if (!doc) { el.innerHTML = `<div class="row"><button class="btn" data-up>📄 Chọn file PDF sách</button><span class="small muted">Có thể dán chữ của bài vào ô bên dưới nếu không có PDF.</span></div>`; $("[data-up]", el).onclick = upload; return; }
+    if (!list.length) { el.innerHTML = `<div class="row"><button class="btn" data-up>📄 Chọn file PDF sách</button><span class="small muted">Môn có nhiều tập thì thêm từng quyển. Có thể dán chữ của bài vào ô bên dưới nếu không có PDF.</span></div>`; $("[data-up]", el).onclick = upload; return; }
+    if (!doc) { el.innerHTML = shelf() + `<p class="small muted">Bấm vào một quyển để mở.</p>`; bind(); return; }
     const end = Math.min(doc.numPages, start + PER - 1);
-    el.innerHTML = `<div class="row between"><span class="small">📗 <b>${esc(name)}</b> · ${doc.numPages} trang</span><button class="btn ghost small" data-up>Đổi sách</button></div>
-      <div class="row" style="margin-top:6px"><button class="btn small" data-prev>←</button><span class="small">Trang ${start}–${end}</span><button class="btn small" data-next>→</button>
+    el.innerHTML = shelf() + `<div class="row" style="margin-top:8px"><button class="btn small" data-prev>←</button><span class="small">Trang ${start}–${end} / ${doc.numPages}</span><button class="btn small" data-next>→</button>
       <span class="small">Đi tới trang</span><input type="number" min="1" max="${doc.numPages}" style="width:90px" data-jump><span class="small muted">Đã chọn: ${sel.length ? sel.join(", ") : "chưa có"} (tối đa ${maxSel})</span></div>
       <div class="pages">${Array.from({ length: end - start + 1 }, (_, k) => start + k).map(n => `<div class="pg ${sel.includes(n) ? "on" : ""}" data-n="${n}"><canvas></canvas>Trang ${n}</div>`).join("")}</div>`;
-    $("[data-up]", el).onclick = upload;
+    bind();
     $("[data-prev]", el).onclick = () => { start = Math.max(1, start - PER); draw(); };
     $("[data-next]", el).onclick = () => { if (start + PER <= doc.numPages) { start += PER; draw(); } };
     $("[data-jump]", el).onchange = e => { const n = Math.max(1, Math.min(doc.numPages, +e.target.value || 1)); start = Math.max(1, n - 2); draw(); };
     $$(".pg", el).forEach(d => { thumb(+d.dataset.n, $("canvas", d)).catch(() => {}); d.onclick = () => { const n = +d.dataset.n; if (sel.includes(n)) sel = sel.filter(x => x !== n); else { if (sel.length >= maxSel) return toast(`Chọn tối đa ${maxSel} trang mỗi lần.`); sel.push(n); sel.sort((a, b) => a - b); } draw(); }; });
   }
+  function bind() {
+    $$("[data-bk]", el).forEach(b => b.onclick = () => b.dataset.bk !== cur && open(b.dataset.bk));
+    $("[data-up]", el).onclick = upload;
+    const rmb = $("[data-rm]", el); if (rmb) rmb.onclick = async () => {
+      if (!confirm("Bỏ quyển sách này khỏi máy? (Bài tập và bản đồ đã lưu không bị ảnh hưởng)")) return;
+      list = list.filter(b => b.id !== cur); await BookDB.set("list_" + subject, list); await BookDB.set("bk_" + cur, null); delete pdfCache[cur]; doc = null; cur = null;
+      if (list.length) open(list[0].id); else draw();
+    };
+  }
   function upload() {
-    const fp = $("#filePick"); fp.accept = "application/pdf"; fp.removeAttribute("capture"); fp.value = "";
-    fp.onchange = async () => { const f = fp.files[0]; if (!f) return; el.innerHTML = `<p class="small"><span class="spin"></span> Đang mở sách…</p>`;
-      try { const buf = await f.arrayBuffer(); await BookDB.set("book_" + subject, { name: f.name, buf }); await load(buf, f.name); } catch (e) { toast("Không mở được file PDF này."); doc = null; draw(); } };
+    const fp = $("#filePick"); fp.accept = "application/pdf"; fp.removeAttribute("capture"); fp.multiple = true; fp.value = "";
+    fp.onchange = async () => { const files = [...fp.files]; fp.multiple = false; if (!files.length) return; el.innerHTML = `<p class="small"><span class="spin"></span> Đang mở sách…</p>`;
+      let last = null;
+      for (const f of files) { try { const buf = await f.arrayBuffer(); await openPdf(buf.slice(0)); const id = subject + "_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
+        await BookDB.set("bk_" + id, { name: f.name, buf }); list.push({ id, name: f.name }); last = id; } catch (e) { toast("Không mở được file " + f.name); } }
+      list.sort((a, b) => a.name.localeCompare(b.name, "vi", { numeric: true })); await BookDB.set("list_" + subject, list);
+      if (last) open(last); else draw(); };
     fp.click();
   }
-  (async () => { if (pdfCache[subject]) { doc = pdfCache[subject].doc; name = pdfCache[subject].name; return draw(); } const saved = await BookDB.get("book_" + subject); if (saved) { try { await load(saved.buf, saved.name); return; } catch (e) {} } draw(); })();
+  (async () => { list = await bookList(subject); const want = LS.get("curbook_" + subject, null); const id = list.find(b => b.id === want) ? want : (list[0] && list[0].id); if (id) open(id); else draw(); })();
   return {
     selected: () => sel.slice(),
     async extract(pages) {
