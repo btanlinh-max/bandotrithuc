@@ -132,7 +132,7 @@ function askCode() {
     <input type="text" id="code" placeholder="Ví dụ: K7PQ2M" maxlength="8" style="font-size:24px;text-transform:uppercase;letter-spacing:4px;text-align:center">
     <div class="row" style="margin-top:12px"><button class="btn primary big grow" id="go">Vào lớp</button></div></div>`;
   const go = () => { const v = $("#code").value.trim().toUpperCase(); if (v.length < 4) return toast("Em nhập đủ mã lớp nhé."); CLASS_CODE = v; LS.set("code", v); sLogin(); };
-  $("#go").onclick = go; $("#code").onkeydown = e => e.key === "Enter" && go(); $("#code").focus();
+  $("#go").onclick = go; $("#code").onkeydown = e => { if (e.key === "Enter") go(); }; $("#code").focus();
 }
 function pinPad(st) {
   let pin = "";
@@ -178,7 +178,7 @@ async function sHome() {
     $$("#sBody .tabs button[data-s]").forEach(b => b.onclick = () => { SSUBJ = b.dataset.s; sHome(); });
     const lessons = HOME.lessons.filter(l => l.subject === SSUBJ).sort((a, b) => a.order - b.order);
     $("#theMap").innerHTML = lessons.length ? mapHTML(lessons, id => HOME.mastery[id] || "khoa", { here: true, avatar: HOME.student.avatar }) : `<div class="card muted">Cô chưa vẽ bản đồ môn này.</div>`;
-    $$("#theMap .node").forEach(n => { n.onclick = () => lessonSheet(n.dataset.id); n.onkeydown = e => e.key === "Enter" && lessonSheet(n.dataset.id); });
+    $$("#theMap .node").forEach(n => { n.onclick = () => lessonSheet(n.dataset.id); n.onkeydown = e => { if (e.key === "Enter") lessonSheet(n.dataset.id); }; });
   }
   $$("[data-do]").forEach(b => b.onclick = () => sDo(b.dataset.do));
   $$("[data-rv]").forEach(b => b.onclick = () => sReview(b.dataset.rv));
@@ -350,7 +350,7 @@ async function tLogin() {
     <details style="margin-top:14px"><summary class="small muted">Đổi máy chủ lớp</summary>${serverBox()}</details></div>`;
   bindServerBox();
   const go = e => busy($("#go"), async () => { const r = await api("teacherLogin", { password: $("#pw").value }); setSession({ role: "T", token: r.token, name: info.teacherName || "Cô giáo", avatar: "👩‍🏫" }); tApp(); }, "Đang vào…");
-  $("#go").onclick = go; $("#pw").onkeydown = e => e.key === "Enter" && go(); $("#pw").focus();
+  $("#go").onclick = go; $("#pw").onkeydown = e => { if (e.key === "Enter") go(); }; $("#pw").focus();
 }
 function serverBox() {
   return `<div style="margin-top:8px"><label class="f">Link máy chủ lớp (Google Apps Script)</label><input type="url" id="srv" placeholder="https://script.google.com/macros/s/…/exec" value="${esc(API)}">
