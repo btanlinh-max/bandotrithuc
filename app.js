@@ -346,10 +346,10 @@ async function tLogin() {
   if (!info) { app().innerHTML = `<div class="narrow card"><h2>Chưa kết nối được máy chủ lớp</h2><p>Cô kiểm tra mạng hoặc dán lại link máy chủ.</p>${serverBox()}</div>`; bindServerBox(); return; }
   if (info.needSetup) return tSetup();
   app().innerHTML = `<div class="narrow card"><h2>👩‍🏫 Cô giáo lớp ${esc(info.className)}</h2><label class="f">Mật khẩu</label><input type="password" id="pw" autocomplete="current-password">
-    <div class="row" style="margin-top:12px"><button class="btn primary grow" id="go">Vào lớp</button></div>
+    <p id="loginErr" class="small" style="color:var(--berry);font-weight:700;margin:6px 0 0"></p><div class="row" style="margin-top:12px"><button class="btn primary grow" id="go">Vào lớp</button></div>
     <details style="margin-top:14px"><summary class="small muted">Đổi máy chủ lớp</summary>${serverBox()}</details></div>`;
   bindServerBox();
-  const go = e => busy($("#go"), async () => { const r = await api("teacherLogin", { password: $("#pw").value }); setSession({ role: "T", token: r.token, name: info.teacherName || "Cô giáo", avatar: "👩‍🏫" }); tApp(); }, "Đang vào…");
+  const go = e => busy($("#go"), async () => { $("#loginErr").textContent = ""; const r = await api("teacherLogin", { password: $("#pw").value }); setSession({ role: "T", token: r.token, name: info.teacherName || "Cô giáo", avatar: "👩‍🏫" }); tApp(); }, "Đang vào…").catch(err => { const el = $("#loginErr"); if (el) el.textContent = "⚠️ " + (err.message || err); });
   $("#go").onclick = go; $("#pw").onkeydown = e => { if (e.key === "Enter") go(); }; $("#pw").focus();
 }
 function serverBox() {
