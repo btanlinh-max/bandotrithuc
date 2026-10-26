@@ -439,14 +439,23 @@ function tBando() {
     $$("[data-dn]", body).forEach(b => b.onclick = () => { const i = +b.dataset.dn; if (i < rows.length - 1) { [rows[i + 1], rows[i]] = [rows[i], rows[i + 1]]; draw(); } });
     $$("[data-rm]", body).forEach(b => b.onclick = () => { rows.splice(+b.dataset.rm, 1); draw(); });
     $("#pasteL").onclick = () => {
-      const t = prompt("Dán danh sách bài. Mỗi dòng một bài, dạng:  Chủ đề | Tên bài\n(hoặc dòng bắt đầu bằng # là tên chủ đề, các dòng sau là bài của chủ đề đó)"); if (!t) return;
-      let topic = rows.length ? rows[rows.length - 1].topic : "", add = [];
-      t.split(/\n/).map(x => x.trim()).filter(Boolean).forEach(line => {
-        if (line.startsWith("#")) { topic = line.replace(/^#+\s*/, ""); return; }
-        const parts = line.split("|").map(x => x.trim());
-        if (parts.length > 1) { topic = parts[0]; add.push({ subject: BSUBJ, topic, title: parts.slice(1).join(" | ") }); } else add.push({ subject: BSUBJ, topic, title: line });
-      });
-      rows = rows.concat(add); draw(); toast(`Đã thêm ${add.length} bài. Cô bấm Lưu bản đồ nhé.`);
+      const ov = document.createElement("div"); ov.style.cssText = "position:fixed;inset:0;background:rgba(43,42,51,.55);z-index:80;display:grid;place-items:center;padding:16px";
+      ov.innerHTML = `<div class="card" style="width:min(720px,100%);max-height:90vh;overflow:auto;margin:0"><h3>📋 Dán danh sách bài</h3>
+        <p class="small muted">Mỗi dòng một bài. Dòng bắt đầu bằng <b>#</b> là tên chủ đề, các dòng sau nó là bài của chủ đề đó.</p>
+        <textarea rows="14" id="pasteBox" placeholder="# Chủ đề 1: Ôn tập và bổ sung&#10;Bài 1. Ôn tập các số đến 1 000&#10;Bài 2. Ôn tập phép cộng, phép trừ"></textarea>
+        <div class="row" style="margin-top:10px"><button class="btn primary" id="pasteOk">Thêm vào danh sách</button><button class="btn ghost" id="pasteX">Hủy</button></div></div>`;
+      document.body.appendChild(ov); $("#pasteBox", ov).focus();
+      $("#pasteX", ov).onclick = () => ov.remove();
+      $("#pasteOk", ov).onclick = () => {
+        let topic = rows.length ? rows[rows.length - 1].topic : "", add = [];
+        $("#pasteBox", ov).value.split(/\n/).map(x => x.trim()).filter(Boolean).forEach(line => {
+          if (line.startsWith("#")) { topic = line.replace(/^#+\s*/, ""); return; }
+          const parts = line.split("|").map(x => x.trim());
+          if (parts.length > 1) { topic = parts[0]; add.push({ subject: BSUBJ, topic, title: parts.slice(1).join(" | ") }); } else add.push({ subject: BSUBJ, topic, title: line });
+        });
+        ov.remove(); if (!add.length) return toast("Chưa có dòng nào để thêm.");
+        rows = rows.concat(add); draw(); toast(`Đã thêm ${add.length} bài. Cô bấm Lưu bản đồ nhé.`);
+      };
     };
     $("#addL").onclick = () => { rows.push({ subject: BSUBJ, topic: rows.length ? rows[rows.length - 1].topic : "", title: "" }); draw(); };
     $("#saveL").onclick = e => busy(e.currentTarget, async () => { await api("saveLessons", { subject: BSUBJ, lessons: rows.map(r => Object.assign(r, { subject: BSUBJ })) }); TD = null; toast("Đã lưu bản đồ."); BMODE = "lop"; await tApp("bando"); });
