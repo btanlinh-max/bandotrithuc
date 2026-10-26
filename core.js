@@ -26,6 +26,22 @@ var Core = (function () {
     [0, "Em đừng buồn, mình cùng ôn lại bài này nhé. Có chỗ nào chưa hiểu em hỏi cô."]
   ];
 
+  var MANUAL_FORMAT = [
+    "ĐỊNH DẠNG TRẢ LỜI (rất quan trọng, để máy đọc được): viết từng câu theo đúng mẫu dưới đây, mỗi câu bắt đầu bằng dòng \"CÂU 1\", \"CÂU 2\"… Không dùng bảng, không thêm lời dẫn hay giải thích ngoài mẫu.",
+    "CÂU 1",
+    "Dạng: mcq",
+    "Mức: 1",
+    "Điểm: 1",
+    "Đề: nội dung đề bài",
+    "A. lựa chọn A",
+    "B. lựa chọn B",
+    "C. lựa chọn C",
+    "D. lựa chọn D",
+    "Đáp án: B",
+    "Giải thích: một câu ngắn cho học sinh",
+    "",
+    "Ghi chú: Dạng chỉ được là mcq, tf, fill, short hoặc photo. Chỉ câu mcq mới có dòng A. B. C. D.; câu tf thì Đáp án là Đúng hoặc Sai; câu fill thì Đáp án là kết quả ngắn (nhiều cách viết thì ngăn bằng dấu |); câu short và photo có thêm dòng \"Cách chấm: …\" để cô cho điểm. Mức là 1, 2 hoặc 3. Điểm là 1 hoặc 2."
+  ].join("\n");
   function make(A) {
     var cache = {};
     function all(t) { if (!cache[t]) cache[t] = A.all(t) || []; return cache[t]; }
@@ -85,7 +101,7 @@ var Core = (function () {
     }
 
     /* ---------- AI: lời dặn ---------- */
-    function genPrompt(p, lessonTitle, subjectName) {
+    function genPrompt(p, lessonTitle, subjectName, manual) {
       var n = p.n || { 1: 3, 2: 3, 3: 2 };
       var types = (p.types && p.types.length ? p.types : ["mcq", "fill", "tf", "short"]);
       return [
@@ -109,8 +125,7 @@ var Core = (function () {
         "  short = trả lời bằng câu/đoạn ngắn, cô chấm (answer = đáp án gợi ý; rubric = cách cho điểm);",
         "  photo = làm vào vở rồi chụp ảnh nộp, dùng cho bài cần trình bày, đặt tính, viết đoạn (answer = lời giải mẫu; rubric = cách cho điểm).",
         "",
-        "Trả về DUY NHẤT một mảng JSON, mỗi phần tử:",
-        "{\"type\":\"mcq|tf|fill|short|photo\",\"level\":1|2|3,\"text\":\"đề bài\",\"options\":[\"...\"] (chỉ với mcq),\"answer\":...,\"points\":1 hoặc 2,\"rubric\":\"...\" (với short/photo),\"explain\":\"giải thích ngắn cho học sinh khi xem lại bài\"}"
+        manual ? MANUAL_FORMAT : "Trả về DUY NHẤT một mảng JSON, mỗi phần tử:\n{\"type\":\"mcq|tf|fill|short|photo\",\"level\":1|2|3,\"text\":\"đề bài\",\"options\":[\"...\"] (chỉ với mcq),\"answer\":...,\"points\":1 hoặc 2,\"rubric\":\"...\" (với short/photo),\"explain\":\"giải thích ngắn cho học sinh khi xem lại\"}"
       ].join("\n");
     }
     function tocPrompt(subjectName) {
@@ -304,15 +319,51 @@ var Core = (function () {
         then: function (text, e) { if (e) throw e; var arr = extractJSON(text); log("ai_toc", { subject: p.subject, n: arr.length });
           return { lessons: arr.filter(function (x) { return x && x.title; }).map(function (x) { return { subject: p.subject, topic: String(x.topic || ""), title: String(x.title) }; }) }; } };
     };
-    function genPromptFull(p) {
+    function genPromptFull(p, manual) {
       var l = get("lessons", p.lessonId), title = l ? l.title + (l.topic ? " (chủ đề: " + l.topic + ")" : "") : (p.lessonTitle || "");
-      var prompt = genPrompt(p, title, subjectName(p.subject || (l && l.subject)));
+      var prompt = genPrompt(p, title, subjectName(p.subject || (l && l.subject)), manual);
       if (p.text) prompt += "\n\nChữ trích từ các trang sách (để hiểu kiến thức, KHÔNG chép bài tập):\n" + String(p.text).slice(0, 12000);
       return prompt;
     }
+    function fixJSON(t) {
+      return t.replace(/[\u201C\u201D]/g, '"').replace(/,\s*([}\]])/g, "$1").replace(/("(?:[^"\\]|\\.)*")/g, function (m) { return m.replace(/\n/g, "\\n").replace(/\r/g, ""); });
+    }
+    function salvage(t) {   // nhặt từng câu {...} đọc được, bỏ câu hỏng hoặc bị cắt dở
+      var out = [], depth = 0, start = -1, inStr = false, esc = false; t = String(t);
+      for (var i = 0; i < t.length; i++) {
+        var c = t[i];
+        if (inStr) { if (esc) esc = false; else if (c === "\\") esc = true; else if (c === '"') inStr = false; continue; }
+        if (c === '"') inStr = true; else if (c === "{") { if (!depth) start = i; depth++; }
+        else if (c === "}" && depth) { depth--; if (!depth) { try { out.push(JSON.parse(fixJSON(t.slice(start, i + 1)))); } catch (e) {} } }
+      }
+      return out;
+    }
+    function parseText(t) {
+      var clean = String(t || "").replace(/\*\*|__|```[a-z]*|^\s*[-*•]\s+/gim, "");
+      var parts = clean.split(/^\s*(?:#+\s*)?CÂU\s*\d+[^\n]*$/im).slice(1), out = [];
+      parts.forEach(function (blk) {
+        var q = { options: [] }, cur = null;
+        blk.split(/\n/).forEach(function (line) {
+          var m = line.match(/^\s*(Dạng|Mức|Điểm|Đề bài|Đề|Đáp án|Giải thích|Cách chấm)\s*[:：]\s*(.*)$/i), o = line.match(/^\s*([ABCD])\s*[.)]\s+(.*)$/);
+          if (m) { cur = m[1].toLowerCase().replace("đề bài", "đề"); q[cur] = m[2].trim(); }
+          else if (o && cur !== "giải thích" && cur !== "cách chấm") { q.options["ABCD".indexOf(o[1])] = o[2].trim(); cur = "opt"; }
+          else if (cur && cur !== "opt" && line.trim()) q[cur] = (q[cur] ? q[cur] + "\n" : "") + line.trim();
+        });
+        var type = String(q["dạng"] || "").toLowerCase().replace(/[^a-z]/g, ""); if (["mcq", "tf", "fill", "short", "photo"].indexOf(type) < 0) type = q.options.filter(Boolean).length >= 2 ? "mcq" : "short";
+        var ans = q["đáp án"] || "";
+        var o = { type: type, level: parseInt(q["mức"], 10) || 1, points: parseInt(q["điểm"], 10) || 1, text: q["đề"] || "", explain: q["giải thích"] || "", rubric: q["cách chấm"] || "" };
+        if (type === "mcq") { o.options = q.options.filter(function (x) { return x !== undefined; }); var L = String(ans).trim().toUpperCase().charAt(0); o.answer = Math.max(0, "ABCD".indexOf(L)); }
+        else if (type === "tf") o.answer = /đúng|true|^d/i.test(ans) && !/sai/i.test(ans); else o.answer = ans;
+        out.push(o);
+      });
+      return out;
+    }
     function parseQs(text) {
-      var arr = extractJSON(text); if (!Array.isArray(arr)) arr = arr.questions || [];
-      return arr.map(cleanQ).filter(function (q) { return q.text && (q.type !== "mcq" || q.options.length >= 2); });
+      var arr = null;
+      if (/^\s*[*#]*\s*CÂU\s*\d+/im.test(String(text))) arr = parseText(text);
+      else { try { arr = extractJSON(text); } catch (e1) { try { arr = JSON.parse(fixJSON(String(text).replace(/```json|```/gi, "").trim().replace(/^[^\[{]*/, ""))); } catch (e2) { arr = salvage(text); if (!arr.length) arr = parseText(text); } } }
+      if (arr && !Array.isArray(arr)) arr = arr.questions || [];
+      return (arr || []).map(cleanQ).filter(function (q) { return q.text && (q.type !== "mcq" || q.options.length >= 2); });
     }
     H.aiGen = function (p) {
       var prompt = genPromptFull(p);
@@ -324,7 +375,7 @@ var Core = (function () {
     };
     /* Cách dự phòng khi AI trong web hết lượt: cô sao chép lời dặn sang ứng dụng Gemini rồi dán kết quả về */
     H.aiTest = function () { return { __test: true }; };
-    H.aiPrompt = function (p) { return { prompt: genPromptFull(p) }; };
+    H.aiPrompt = function (p) { return { prompt: genPromptFull(p, true) }; };
     H.aiParse = function (p) {
       var qs = parseQs(p.text); if (!qs.length) throw err("Chưa đọc được câu hỏi nào. Cô sao chép TOÀN BỘ câu trả lời của Gemini rồi dán lại nhé.");
       log("ai_gen", { lessonId: p.lessonId, n: qs.length, manual: true }); return { questions: qs };

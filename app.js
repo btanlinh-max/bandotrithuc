@@ -47,8 +47,10 @@ async function api(action, payload) {
   const token = SESSION && SESSION.token;
   if (API) {
     let res;
-    try { res = await fetch(API, { method: "POST", body: JSON.stringify({ action, payload, token }) }); }
-    catch (e) { throw new Error("Không kết nối được máy chủ lớp. Kiểm tra mạng rồi thử lại."); }
+    const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), 150000);
+    try { res = await fetch(API, { method: "POST", body: JSON.stringify({ action, payload, token }), signal: ctl.signal }); }
+    catch (e) { throw new Error(e.name === "AbortError" ? "Máy chủ phản hồi quá lâu (AI đang bận). Cô bấm lại, hoặc dùng cách “Soạn bằng ứng dụng Gemini”." : "Không kết nối được máy chủ lớp. Kiểm tra mạng rồi thử lại."); }
+    finally { clearTimeout(timer); }
     let j; try { j = await res.json(); } catch (e) { throw new Error("Máy chủ lớp trả lời lỗi. Cô kiểm tra lại link máy chủ trong Cài đặt."); }
     if (!j.ok) { if (j.code === "auth") logout(true); throw new Error(j.error); }
     return j.data;
@@ -62,8 +64,9 @@ async function api(action, payload) {
 }
 function toast(msg, ms = 2600) { const t = $("#toast"); t.textContent = msg; t.classList.add("on"); clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove("on"), ms); }
 async function busy(btn, fn, label) {
-  const old = btn && btn.innerHTML; if (btn) { btn.disabled = true; btn.innerHTML = `<span class="spin"></span> ${label || "Đang xử lí…"}`; }
-  try { return await fn(); } catch (e) { toast(e.message || String(e), 4200); throw e; } finally { if (btn) { btn.disabled = false; btn.innerHTML = old; } }
+  const old = btn && btn.innerHTML; let tm = null, t0 = Date.now();
+  if (btn) { btn.disabled = true; const set = () => btn.innerHTML = `<span class="spin"></span> ${label || "Đang xử lí…"} ${Math.round((Date.now() - t0) / 1000)}s`; set(); tm = setInterval(set, 1000); }
+  try { return await fn(); } catch (e) { toast(e.message || String(e), 6000); throw e; } finally { clearInterval(tm); if (btn) { btn.disabled = false; btn.innerHTML = old; } }
 }
 function setSession(s) { SESSION = s; if (s) LS.set("session", s); else LS.del("session"); }
 function logout(expired) { setSession(null); TD = null; HOME = null; if (expired) toast("Phiên đăng nhập đã hết, vui lòng đăng nhập lại."); route(); }
