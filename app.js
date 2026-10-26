@@ -24,7 +24,7 @@ let API = LS.get("demo", false) ? "" : (LS.get("api", "") || CFG_API);
 let SESSION = LS.get("session", null);
 let CLASS_CODE = LS.get("code", "");
 let TD = null;           // dữ liệu cô
-let TVIEW = "tong";
+let TVIEW = "tong", seeding = false;
 let HOME = null;         // dữ liệu học sinh
 
 /* ---------- link lớp: #lop=MÃ&may=… ---------- */
@@ -378,6 +378,14 @@ async function tApp(view, keep) {
   if (view) TVIEW = view;
   frame({ nav: true });
   if (!keep || !TD) { if (!TD) app().innerHTML = `<p class="muted">Đang tải lớp…</p>`; try { TD = await api("tHome", {}); } catch (e) { return; } }
+  if (!TD.lessons.length && API && !seeding) {   // lớp mới: tự nạp danh sách bài Toán, Tiếng Việt 3 từ mục lục sách
+    seeding = true;
+    try { const d = await (await fetch("bai-hoc-lop3.json")).json(); const all = [];
+      Object.keys(d).forEach(sj => d[sj].forEach(l => all.push({ subject: sj, topic: l.topic, title: l.title })));
+      for (const sj of Object.keys(d)) await api("saveLessons", { subject: sj, lessons: all.filter(x => x.subject === sj) });
+      TD = await api("tHome", {}); toast("Đã nạp sẵn bản đồ bài học Toán và Tiếng Việt lớp 3."); } catch (e) {}
+    seeding = false;
+  }
   const nWait = TD.subs.filter(s => s.status === "cho_duyet").length;
   $("#nav").innerHTML = TNAV.map(([k, n]) => `<button data-v="${k}" class="${TVIEW === k ? "on" : ""}">${n}${k === "cham" && nWait ? `<span class="badge">${nWait}</span>` : ""}</button>`).join("");
   $$("#nav button").forEach(b => b.onclick = () => tApp(b.dataset.v, true));

@@ -1,2 +1,2 @@
-/* Link máy chủ lớp (Google Apps Script). Để trống = bản dùng thử. Cô cũng có thể dán link trong mục Cài đặt. */
-window.BDTT_CONFIG = { api: "" };
+/* Link máy chủ lớp 3A10 (Google Apps Script). Để trống = bản dùng thử. */
+window.BDTT_CONFIG = { api: "https://script.google.com/macros/s/AKfycbwkamA3UuZSg2qrx8fxohIZ1pftD__KlTCCq6ngZDPO0lReD0DQLcLxjdvbPLWWBBSXYQ/exec" };
