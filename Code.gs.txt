@@ -448,20 +448,29 @@ var GasAdapter = {
 
 function callGemini_(parts, json, key, model) {
   if (!key) throw new Error("Cô chưa nhập mã AI Gemini (vào Cài đặt).");
-  var models = [model || "gemini-2.5-flash", "gemini-flash-latest", "gemini-2.0-flash"].filter(function (m, i, a) { return m && a.indexOf(m) === i; }), last;
+  // Google quá tải (503) hoặc hết lượt (429) thì thử lại, rồi chuyển sang mô hình khác
+  var models = [model || "gemini-2.5-flash", "gemini-2.5-flash", "gemini-flash-latest", "gemini-2.5-flash-lite", "gemini-2.0-flash"].filter(function (m, i, a) { return m && a.indexOf(m) === i; });
+  var busy = false, last = null;
   for (var i = 0; i < models.length; i++) {
-    var res = UrlFetchApp.fetch("https://generativelanguage.googleapis.com/v1beta/models/" + models[i] + ":generateContent", {
-      method: "post", contentType: "application/json", muteHttpExceptions: true, headers: { "x-goog-api-key": key },
-      payload: JSON.stringify({ contents: [{ role: "user", parts: parts }], generationConfig: json ? { temperature: 0.5, responseMimeType: "application/json" } : { temperature: 0.5 } })
-    });
-    var code = res.getResponseCode(), body = res.getContentText();
-    if (code === 404) { last = new Error("Không tìm thấy mô hình AI " + models[i]); continue; }
-    if (code === 429) throw new Error("Hết lượt AI miễn phí trong lúc này. Cô chờ 1 phút rồi thử lại.");
-    if (code >= 400) { var msg = ""; try { msg = JSON.parse(body).error.message; } catch (e) {} throw new Error("Mã AI chưa dùng được (Google báo " + code + ": " + msg + ")."); }
-    var d = JSON.parse(body);
-    return ((((d.candidates || [])[0] || {}).content || {}).parts || []).map(function (p) { return p.text || ""; }).join("").trim();
+    for (var tries = 0; tries < 2; tries++) {
+      var res = UrlFetchApp.fetch("https://generativelanguage.googleapis.com/v1beta/models/" + models[i] + ":generateContent", {
+        method: "post", contentType: "application/json", muteHttpExceptions: true, headers: { "x-goog-api-key": key },
+        payload: JSON.stringify({ contents: [{ role: "user", parts: parts }], generationConfig: json ? { temperature: 0.5, responseMimeType: "application/json" } : { temperature: 0.5 } })
+      });
+      var code = res.getResponseCode(), body = res.getContentText(), msg = "";
+      try { msg = JSON.parse(body).error.message; } catch (e) {}
+      if (code === 200) {
+        var d = JSON.parse(body);
+        return ((((d.candidates || [])[0] || {}).content || {}).parts || []).map(function (p) { return p.text || ""; }).join("").trim();
+      }
+      if (code === 429 || code >= 500) { busy = true; last = msg; if (tries === 0) { Utilities.sleep(2500); continue; } break; }
+      if (code === 404) break;
+      if (code === 400 && /model/i.test(msg) && !/key/i.test(msg)) break;
+      throw new Error("Mã AI chưa dùng được (Google báo " + code + ": " + msg + "). Cô kiểm tra lại mã trong Cài đặt.");
+    }
   }
-  throw last || new Error("Không gọi được AI.");
+  if (busy) throw new Error("AI của Google đang quá tải hoặc hết lượt miễn phí trong lúc này. Cô chờ vài phút rồi bấm lại nhé.");
+  throw new Error("Không gọi được AI" + (last ? ": " + last : "."));
 }
 
 var WRITE = { init: 1, studentLogin: 1, submit: 1, practiceDone: 1, saveSettings: 1, saveStudents: 1, saveLessons: 1, saveAsg: 1, delAsg: 1, review: 1, regrade: 1, aiGen: 1, aiToc: 1 };

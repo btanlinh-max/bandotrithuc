@@ -430,7 +430,7 @@ function tBando() {
   const draw = () => {
     body.innerHTML = `<div class="card"><h3>✨ AI đọc mục lục sách</h3><p class="small muted">Chọn file PDF sách ${esc(subjName(BSUBJ, subs))}, đánh dấu các trang mục lục, AI liệt kê chủ đề và bài. Sách chỉ mở trên máy của cô, không tải lên mạng.</p>
       <div id="tocPdf"></div><div class="row" style="margin-top:8px"><button class="btn primary" id="tocGo">AI đọc mục lục</button></div></div>
-      <div class="card"><div class="row between"><h3>Danh sách bài (${rows.length})</h3><button class="btn small" id="addL">+ Thêm bài</button></div>
+      <div class="card"><div class="row between"><h3>Danh sách bài (${rows.length})</h3><div class="row"><button class="btn small" id="pasteL">📋 Dán danh sách bài</button><button class="btn small" id="addL">+ Thêm bài</button></div></div>
       <div class="scroll"><table class="t"><thead><tr><th>#</th><th>Chủ đề</th><th>Tên bài</th><th></th></tr></thead><tbody>${rows.map((l, i) => `<tr data-i="${i}"><td>${i + 1}</td><td><input type="text" data-f="topic" value="${esc(l.topic)}"></td><td><input type="text" data-f="title" value="${esc(l.title)}"></td>
       <td style="white-space:nowrap"><button class="btn ghost small" data-up="${i}">↑</button><button class="btn ghost small" data-dn="${i}">↓</button><button class="btn ghost small danger" data-rm="${i}">✕</button></td></tr>`).join("")}</tbody></table></div>
       <div class="row" style="margin-top:10px"><button class="btn primary" id="saveL">Lưu bản đồ</button><span class="small muted">Bài đã có bài tập thì nên sửa tên, không nên xóa.</span></div></div>`;
@@ -438,6 +438,16 @@ function tBando() {
     $$("[data-up]", body).forEach(b => b.onclick = () => { const i = +b.dataset.up; if (i) { [rows[i - 1], rows[i]] = [rows[i], rows[i - 1]]; draw(); } });
     $$("[data-dn]", body).forEach(b => b.onclick = () => { const i = +b.dataset.dn; if (i < rows.length - 1) { [rows[i + 1], rows[i]] = [rows[i], rows[i + 1]]; draw(); } });
     $$("[data-rm]", body).forEach(b => b.onclick = () => { rows.splice(+b.dataset.rm, 1); draw(); });
+    $("#pasteL").onclick = () => {
+      const t = prompt("Dán danh sách bài. Mỗi dòng một bài, dạng:  Chủ đề | Tên bài\n(hoặc dòng bắt đầu bằng # là tên chủ đề, các dòng sau là bài của chủ đề đó)"); if (!t) return;
+      let topic = rows.length ? rows[rows.length - 1].topic : "", add = [];
+      t.split(/\n/).map(x => x.trim()).filter(Boolean).forEach(line => {
+        if (line.startsWith("#")) { topic = line.replace(/^#+\s*/, ""); return; }
+        const parts = line.split("|").map(x => x.trim());
+        if (parts.length > 1) { topic = parts[0]; add.push({ subject: BSUBJ, topic, title: parts.slice(1).join(" | ") }); } else add.push({ subject: BSUBJ, topic, title: line });
+      });
+      rows = rows.concat(add); draw(); toast(`Đã thêm ${add.length} bài. Cô bấm Lưu bản đồ nhé.`);
+    };
     $("#addL").onclick = () => { rows.push({ subject: BSUBJ, topic: rows.length ? rows[rows.length - 1].topic : "", title: "" }); draw(); };
     $("#saveL").onclick = e => busy(e.currentTarget, async () => { await api("saveLessons", { subject: BSUBJ, lessons: rows.map(r => Object.assign(r, { subject: BSUBJ })) }); TD = null; toast("Đã lưu bản đồ."); BMODE = "lop"; await tApp("bando"); });
     const picker = pdfPicker($("#tocPdf"), BSUBJ, 4);

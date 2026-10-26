@@ -22,12 +22,12 @@ var Demo = (function () {
     var key = adapter.secret("key");
     var text = parts[0].text;
     if (key) {
-      var models = ["gemini-2.5-flash", "gemini-flash-latest", "gemini-2.0-flash"], last;
+      var models = ["gemini-2.5-flash", "gemini-flash-latest", "gemini-2.5-flash-lite", "gemini-2.0-flash"], last;
       for (var i = 0; i < models.length; i++) {
         var res = await fetch("https://generativelanguage.googleapis.com/v1beta/models/" + models[i] + ":generateContent", { method: "POST",
           headers: { "Content-Type": "application/json", "x-goog-api-key": key },
           body: JSON.stringify({ contents: [{ role: "user", parts: parts }], generationConfig: json ? { temperature: .5, responseMimeType: "application/json" } : { temperature: .5 } }) });
-        if (res.status === 404) { last = new Error("Không tìm thấy mô hình AI."); continue; }
+        if (res.status === 404 || res.status === 429 || res.status >= 500) { last = new Error("AI của Google đang quá tải, cô thử lại sau vài phút."); continue; }
         if (!res.ok) { var m = ""; try { m = (await res.json()).error.message; } catch (e) {} throw new Error("Mã AI chưa dùng được (Google báo " + res.status + ": " + m + ")."); }
         var d = await res.json();
         return ((((d.candidates || [])[0] || {}).content || {}).parts || []).map(function (p) { return p.text || ""; }).join("");
