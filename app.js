@@ -56,6 +56,7 @@ async function api(action, payload) {
   const core = Core.make(Demo.adapter);
   let r;
   try { r = core.handle(action, payload, token); } catch (e) { if (e.code === "auth") logout(true); throw e; }
+  if (r && r.__test) return await Demo.test();
   while (r && r.__ai) { let text = null, err = null; try { text = await Demo.ai(r.__ai, r.json); } catch (x) { err = x; } r = r.then(text, err); }
   return r;
 }
@@ -834,12 +835,15 @@ function tCaiDat() {
     <div class="card"><h3>AI Gemini</h3><p class="small">${TD.hasKey ? "✅ Đã có mã AI." : "⚠️ Chưa có mã AI."} Mã được cất ở máy chủ của cô${API ? " (Google Sheet)" : " (bản dùng thử: trên máy này)"}, học sinh không nhìn thấy.</p>
     <ol class="small"><li>Mở <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a>, đăng nhập Gmail của cô.</li><li>Bấm “Create API key”, sao chép mã (bắt đầu bằng AIza… hoặc AQ.…).</li><li>Dán vào ô dưới rồi bấm Lưu mã.</li></ol>
     <div class="row"><input type="password" id="key" class="grow" placeholder="${TD.hasKey ? "Đã lưu – nhập mã mới nếu muốn đổi" : "Dán mã AI vào đây"}" style="width:auto"><button class="btn primary" id="s2">Lưu mã</button></div>
+    <div class="row" style="margin-top:8px"><button class="btn" id="aiTest">🔍 Kiểm tra AI</button><span class="small muted">Thử từng mô hình AI và cho biết mô hình nào đang dùng được, lỗi gì.</span></div><div id="aiTestOut" class="small" style="margin-top:6px"></div>
     <label class="f">Mô hình AI (để trống = tự chọn)</label><input type="text" id="md" value="${esc(st.model || "")}" placeholder="gemini-2.5-flash"></div>
     <div class="card"><h3>Mật khẩu của cô</h3><div class="row"><input type="password" id="np" class="grow" placeholder="Mật khẩu mới (ít nhất 6 kí tự)" style="width:auto"><button class="btn" id="s3">Đổi mật khẩu</button></div></div>
     <div class="card"><h3>Máy chủ lớp</h3><p class="small">${API ? "Đang dùng máy chủ Google Sheet của cô." : "Đang dùng <b>bản dùng thử</b> (dữ liệu mẫu trên máy này)."}</p>${serverBox()}${API ? "" : `<button class="btn danger small" id="rs" style="margin-top:8px">Làm mới dữ liệu mẫu</button>`}</div>`;
   bindServerBox();
   $("#s1").onclick = e => busy(e.currentTarget, async () => { await api("saveSettings", { className: $("#cn").value, teacherName: $("#tn").value, school: $("#sc").value, autoReturn: $("#ar").checked, model: $("#md").value.trim() }); TD = null; toast("Đã lưu."); await tApp("caidat"); });
   $("#s2").onclick = e => busy(e.currentTarget, async () => { const k = $("#key").value.trim(); if (!k) throw new Error("Cô dán mã AI vào ô trước."); await api("saveSettings", { key: k, model: $("#md").value.trim() }); TD = null; toast("Đã lưu mã AI."); await tApp("caidat"); });
+  $("#aiTest").onclick = e => busy(e.currentTarget, async () => { const r = await api("aiTest", {});
+    $("#aiTestOut").innerHTML = r.map(x => `<div>${x.ok ? "✅" : "❌"} <b>${esc(x.model)}</b> – ${esc(x.note)}</div>`).join("") + (r.some(x => x.ok) ? "" : '<p class="muted">Không mô hình nào dùng được lúc này: mã AI hết lượt miễn phí hoặc chưa đúng. Cô xem hướng xử lí bên dưới.</p>'); }, "Đang thử các mô hình…");
   $("#s3").onclick = e => busy(e.currentTarget, async () => { await api("saveSettings", { password: $("#np").value }); $("#np").value = ""; toast("Đã đổi mật khẩu."); });
   $("#cpl").onclick = () => navigator.clipboard.writeText(link).then(() => toast("Đã sao chép link lớp."));
   $("#nc").onclick = e => { if (confirm("Đổi mã lớp? Link và thẻ cũ sẽ không dùng được nữa.")) busy(e.currentTarget, async () => { await api("saveSettings", { newCode: true }); TD = null; await tApp("caidat"); }); };

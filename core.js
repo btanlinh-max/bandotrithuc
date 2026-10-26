@@ -323,6 +323,7 @@ var Core = (function () {
       } };
     };
     /* Cách dự phòng khi AI trong web hết lượt: cô sao chép lời dặn sang ứng dụng Gemini rồi dán kết quả về */
+    H.aiTest = function () { return { __test: true }; };
     H.aiPrompt = function (p) { return { prompt: genPromptFull(p) }; };
     H.aiParse = function (p) {
       var qs = parseQs(p.text); if (!qs.length) throw err("Chưa đọc được câu hỏi nào. Cô sao chép TOÀN BỘ câu trả lời của Gemini rồi dán lại nhé.");

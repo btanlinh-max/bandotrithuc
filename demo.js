@@ -106,5 +106,15 @@ var Demo = (function () {
     });
     return d;
   }
-  return { adapter: adapter, ai: ai, reset: function () { db = seed(); save(db); }, password: "demo123" };
+  async function test() {
+    var key = adapter.secret("key"); if (!key) return [{ model: "-", ok: false, note: "Chưa có mã AI" }];
+    var out = [];
+    for (var m of ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-flash-latest", "gemini-2.0-flash"]) {
+      try { var res = await fetch("https://generativelanguage.googleapis.com/v1beta/models/" + m + ":generateContent", { method: "POST", headers: { "Content-Type": "application/json", "x-goog-api-key": key }, body: JSON.stringify({ contents: [{ role: "user", parts: [{ text: "Trả lời đúng một chữ: xin chào" }] }] }) });
+        var msg = ""; if (!res.ok) { try { msg = (await res.json()).error.message; } catch (e) {} } out.push({ model: m, ok: res.ok, note: res.ok ? "dùng được" : res.status + " " + msg.slice(0, 140) }); }
+      catch (e) { out.push({ model: m, ok: false, note: "Không kết nối được" }); }
+    }
+    return out;
+  }
+  return { adapter: adapter, ai: ai, test: test, reset: function () { db = seed(); save(db); }, password: "demo123" };
 })();

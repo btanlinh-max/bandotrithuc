@@ -324,6 +324,7 @@ var Core = (function () {
       } };
     };
     /* Cách dự phòng khi AI trong web hết lượt: cô sao chép lời dặn sang ứng dụng Gemini rồi dán kết quả về */
+    H.aiTest = function () { return { __test: true }; };
     H.aiPrompt = function (p) { return { prompt: genPromptFull(p) }; };
     H.aiParse = function (p) {
       var qs = parseQs(p.text); if (!qs.length) throw err("Chưa đọc được câu hỏi nào. Cô sao chép TOÀN BỘ câu trả lời của Gemini rồi dán lại nhé.");
@@ -459,31 +460,43 @@ var GasAdapter = {
   getFile: function (id) { return Utilities.base64Encode(DriveApp.getFileById(id).getBlob().getBytes()); }
 };
 
+var MODELS_ = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-flash-latest", "gemini-flash-lite-latest", "gemini-2.0-flash", "gemini-2.0-flash-lite"];
+function geminiCall_(model, parts, json, key) {
+  var res = UrlFetchApp.fetch("https://generativelanguage.googleapis.com/v1beta/models/" + model + ":generateContent", {
+    method: "post", contentType: "application/json", muteHttpExceptions: true, headers: { "x-goog-api-key": key },
+    payload: JSON.stringify({ contents: [{ role: "user", parts: parts }], generationConfig: json ? { temperature: 0.5, responseMimeType: "application/json" } : { temperature: 0.5 } })
+  });
+  var code = res.getResponseCode(), body = res.getContentText(), msg = "";
+  try { msg = JSON.parse(body).error.message; } catch (e) {}
+  var text = "";
+  if (code === 200) { try { text = ((((JSON.parse(body).candidates || [])[0] || {}).content || {}).parts || []).map(function (p) { return p.text || ""; }).join("").trim(); } catch (e) {} }
+  return { code: code, msg: msg, text: text };
+}
 function callGemini_(parts, json, key, model) {
   if (!key) throw new Error("Cô chưa nhập mã AI Gemini (vào Cài đặt).");
-  // Google quá tải (503) hoặc hết lượt (429) thì thử lại, rồi chuyển sang mô hình khác
-  var models = [model || "gemini-2.5-flash", "gemini-2.5-flash", "gemini-flash-latest", "gemini-2.5-flash-lite", "gemini-2.0-flash"].filter(function (m, i, a) { return m && a.indexOf(m) === i; });
-  var busy = false, last = null;
+  var ok = PROPS.getProperty("bdtt_okmodel");   // mô hình lần trước chạy được thì thử trước, đỡ tốn lượt
+  var models = [ok, model].concat(MODELS_).filter(function (m, i, a) { return m && a.indexOf(m) === i; });
+  var seen = [], busy = false;
   for (var i = 0; i < models.length; i++) {
     for (var tries = 0; tries < 2; tries++) {
-      var res = UrlFetchApp.fetch("https://generativelanguage.googleapis.com/v1beta/models/" + models[i] + ":generateContent", {
-        method: "post", contentType: "application/json", muteHttpExceptions: true, headers: { "x-goog-api-key": key },
-        payload: JSON.stringify({ contents: [{ role: "user", parts: parts }], generationConfig: json ? { temperature: 0.5, responseMimeType: "application/json" } : { temperature: 0.5 } })
-      });
-      var code = res.getResponseCode(), body = res.getContentText(), msg = "";
-      try { msg = JSON.parse(body).error.message; } catch (e) {}
-      if (code === 200) {
-        var d = JSON.parse(body);
-        return ((((d.candidates || [])[0] || {}).content || {}).parts || []).map(function (p) { return p.text || ""; }).join("").trim();
-      }
-      if (code === 429 || code >= 500) { busy = true; last = msg; if (code >= 500 && tries === 0) { Utilities.sleep(2500); continue; } break; }
-      if (code === 404) break;
-      if (code === 400 && /model/i.test(msg) && !/key/i.test(msg)) break;
-      throw new Error("Mã AI chưa dùng được (Google báo " + code + ": " + msg + "). Cô kiểm tra lại mã trong Cài đặt.");
+      var r = geminiCall_(models[i], parts, json, key);
+      if (r.code === 200 && r.text) { PROPS.setProperty("bdtt_okmodel", models[i]); return r.text; }
+      seen.push(models[i] + ": " + r.code + " " + String(r.msg).slice(0, 110));
+      if (r.code >= 500 && tries === 0) { Utilities.sleep(2000); continue; }
+      break;
+    }
+    var last = seen[seen.length - 1];
+    if (/ 429 | 5\d\d /.test(" " + last.replace(/^[^:]+:/, "")) ) busy = true;
+    if (/ 40[134] /.test(" " + last.replace(/^[^:]+:/, "")) && !/model/i.test(last) ) {
+      if (/API key|permission|PERMISSION|UNAUTHENTICATED|invalid/i.test(last)) throw new Error("Mã AI chưa dùng được (" + last + "). Cô kiểm tra lại mã trong Cài đặt.");
     }
   }
-  if (busy) throw new Error("AI miễn phí của Google đang quá tải hoặc đã hết lượt trong hôm nay. Cô dùng cách “Soạn bằng ứng dụng Gemini” ngay bên dưới nút soạn bài nhé.");
-  throw new Error("Không gọi được AI" + (last ? ": " + last : "."));
+  throw new Error((busy ? "AI miễn phí của Google đang quá tải hoặc hết lượt. " : "Không gọi được AI. ") + "Chi tiết: " + seen.slice(0, 3).join(" | "));
+}
+/* Nút “Kiểm tra AI” trong Cài đặt: thử từng mô hình và báo kết quả */
+function testGemini_(key) {
+  if (!key) return [{ model: "-", ok: false, note: "Chưa có mã AI" }];
+  return MODELS_.map(function (m) { var r = geminiCall_(m, [{ text: "Trả lời đúng một chữ: xin chào" }], false, key); return { model: m, ok: r.code === 200 && !!r.text, note: r.code === 200 ? "dùng được" : (r.code + " " + String(r.msg).slice(0, 140)) }; });
 }
 
 var WRITE = { init: 1, studentLogin: 1, submit: 1, practiceDone: 1, saveSettings: 1, saveStudents: 1, saveLessons: 1, saveAsg: 1, delAsg: 1, review: 1, regrade: 1, aiGen: 1, aiToc: 1 };
@@ -494,6 +507,7 @@ function run_(action, payload, token) {
   try {
     lockIt();
     var core = Core.make(GasAdapter), r = core.handle(action, payload, token);
+    if (r && r.__test) { var key0 = core.aiKey(); unlock(); var res0 = testGemini_(key0); return { ok: true, data: res0 }; }
     while (r && r.__ai) {
       var key = core.aiKey(), model = core.model(); unlock();   // không giữ khóa trong lúc chờ AI
       var text = null, e = null;
