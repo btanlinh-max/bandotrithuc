@@ -304,16 +304,29 @@ var Core = (function () {
         then: function (text, e) { if (e) throw e; var arr = extractJSON(text); log("ai_toc", { subject: p.subject, n: arr.length });
           return { lessons: arr.filter(function (x) { return x && x.title; }).map(function (x) { return { subject: p.subject, topic: String(x.topic || ""), title: String(x.title) }; }) }; } };
     };
-    H.aiGen = function (p) {
+    function genPromptFull(p) {
       var l = get("lessons", p.lessonId), title = l ? l.title + (l.topic ? " (chủ đề: " + l.topic + ")" : "") : (p.lessonTitle || "");
       var prompt = genPrompt(p, title, subjectName(p.subject || (l && l.subject)));
       if (p.text) prompt += "\n\nChữ trích từ các trang sách (để hiểu kiến thức, KHÔNG chép bài tập):\n" + String(p.text).slice(0, 12000);
+      return prompt;
+    }
+    function parseQs(text) {
+      var arr = extractJSON(text); if (!Array.isArray(arr)) arr = arr.questions || [];
+      return arr.map(cleanQ).filter(function (q) { return q.text && (q.type !== "mcq" || q.options.length >= 2); });
+    }
+    H.aiGen = function (p) {
+      var prompt = genPromptFull(p);
       return { __ai: [{ text: prompt }].concat(imgParts(p.images)), json: true, then: function (text, e) {
-        if (e) throw e; var arr = extractJSON(text); if (!Array.isArray(arr)) arr = arr.questions || [];
-        var qs = arr.map(cleanQ).filter(function (q) { return q.text && (q.type !== "mcq" || q.options.length >= 2); });
+        if (e) throw e; var qs = parseQs(text);
         log("ai_gen", { lessonId: p.lessonId, n: qs.length });
         return { questions: qs };
       } };
+    };
+    /* Cách dự phòng khi AI trong web hết lượt: cô sao chép lời dặn sang ứng dụng Gemini rồi dán kết quả về */
+    H.aiPrompt = function (p) { return { prompt: genPromptFull(p) }; };
+    H.aiParse = function (p) {
+      var qs = parseQs(p.text); if (!qs.length) throw err("Chưa đọc được câu hỏi nào. Cô sao chép TOÀN BỘ câu trả lời của Gemini rồi dán lại nhé.");
+      log("ai_gen", { lessonId: p.lessonId, n: qs.length, manual: true }); return { questions: qs };
     };
     H.saveAsg = function (p) {
       var a = p.asg || {}; if (!a.title) throw err("Bài cần có tên.");

@@ -549,11 +549,11 @@ function pdfPicker(el, subject, maxSel) {
   (async () => { list = await bookList(subject); const want = LS.get("curbook_" + subject, null); const id = list.find(b => b.id === want) ? want : (list[0] && list[0].id); if (id) open(id); else draw(); })();
   return {
     selected: () => sel.slice(),
-    async extract(pages) {
+    async extract(pages, o = {}) {
       const images = [], texts = [];
       for (const n of pages) {
-        const p = await doc.getPage(n), v = p.getViewport({ scale: 1 }), k = Math.min(2.2, 1300 / v.width), vp = p.getViewport({ scale: k }), c = document.createElement("canvas");
-        c.width = vp.width; c.height = vp.height; await p.render({ canvasContext: c.getContext("2d"), viewport: vp }).promise; images.push(c.toDataURL("image/jpeg", .72));
+        const p = await doc.getPage(n), v = p.getViewport({ scale: 1 }), k = Math.min(2.2, (o.max || 1300) / v.width), vp = p.getViewport({ scale: k }), c = document.createElement("canvas");
+        c.width = vp.width; c.height = vp.height; await p.render({ canvasContext: c.getContext("2d"), viewport: vp }).promise; images.push(c.toDataURL("image/jpeg", o.q || .72));
         try { const tc = await p.getTextContent(); texts.push(tc.items.map(i => i.str).join(" ")); } catch (e) {}
       }
       return { images, text: texts.join("\n").replace(/\s+/g, " ").trim() };
@@ -577,7 +577,13 @@ function tSoan() {
     <div class="card"><h3>3 · Yêu cầu cho AI</h3><div class="grid3">${[1, 2, 3].map(k => `<div><label class="f">${LEVEL_NAME[k]}</label><input type="number" min="0" max="10" data-n="${k}" value="${D.n[k]}"></div>`).join("")}</div>
     <label class="f">Dạng câu hỏi</label><div class="row">${Object.entries(TYPE_NAME).map(([k, n]) => `<label class="chip ${D.types.includes(k) ? "" : "grey"}" style="cursor:pointer"><input type="checkbox" data-ty="${k}" ${D.types.includes(k) ? "checked" : ""} style="margin:0 4px 0 0">${n}</label>`).join("")}</div>
     <label class="f">Gợi ý thêm (không bắt buộc)</label><input type="text" id="sCtx" value="${esc(D.context)}" placeholder="Ví dụ: tình huống ở chợ quê, vườn cây; lớp có nhiều em đọc chậm">
-    <div class="row" style="margin-top:12px"><button class="btn primary big" id="gen">✨ AI soạn bài tập mới</button>${D.questions.length ? `<span class="small muted">Bấm lại để AI soạn thêm câu (thêm vào cuối).</span>` : ""}</div></div>
+    <div class="row" style="margin-top:12px"><button class="btn primary big" id="gen">✨ AI soạn bài tập mới</button>${D.questions.length ? `<span class="small muted">Bấm lại để AI soạn thêm câu (thêm vào cuối).</span>` : ""}</div>
+    <details id="manualAI" style="margin-top:12px"><summary class="small" style="cursor:pointer;font-weight:700">AI trong web báo quá tải hoặc hết lượt? Soạn bằng ứng dụng Gemini (miễn phí, luôn dùng được)</summary>
+      <ol class="small"><li>Chọn bài, trang sách, số câu ở trên rồi bấm <button class="btn small" id="mCopy">📋 Sao chép lời dặn</button></li>
+      <li>Mở <a href="https://gemini.google.com/app" target="_blank" rel="noopener">gemini.google.com</a>, dán vào ô chat (Ctrl + V), gửi. Nếu sách là ảnh scan, cô kéo thêm ảnh trang sách vào ô chat.</li>
+      <li class="hidden" id="mStep2">Gemini trả lời xong, sao chép <b>toàn bộ</b> câu trả lời, dán vào ô dưới → bấm “Dùng câu trả lời này”.</li></ol>
+      <textarea id="mBox" rows="2" style="display:none"></textarea><textarea id="mAns" rows="4" placeholder="Dán câu trả lời của Gemini vào đây"></textarea>
+      <div class="row" style="margin-top:8px"><button class="btn primary" id="mUse">Dùng câu trả lời này</button></div></details></div>
     <div id="qEdit"></div>`;
   $("#sSub").onchange = e => { D.subject = e.target.value; D.lessonId = ""; tSoan(); };
   $("#sLes").onchange = e => { D.lessonId = e.target.value; };
@@ -588,13 +594,30 @@ function tSoan() {
   $$("[data-n]").forEach(i => i.oninput = () => D.n[i.dataset.n] = Math.max(0, Math.min(10, +i.value || 0)));
   $$("[data-ty]").forEach(c => c.onchange = () => { D.types = $$("[data-ty]").filter(x => x.checked).map(x => x.dataset.ty); c.parentElement.classList.toggle("grey", !c.checked); });
   const picker = pdfPicker($("#soanPdf"), D.subject, 6);
-  $("#gen").onclick = e => busy(e.currentTarget, async () => {
+  const genParams = async () => {
     if (!D.lessonId && !D.pasted) throw new Error("Cô chọn bài hoặc dán nội dung bài học.");
     if (!D.types.length) throw new Error("Cô chọn ít nhất một dạng câu hỏi.");
     if (!(D.n[1] + D.n[2] + D.n[3])) throw new Error("Cô đặt số câu cho ít nhất một mức.");
-    let images = [], text = D.pasted;
-    const pages = picker.selected(); if (pages.length) { const x = await picker.extract(pages); images = x.images; text = (x.text + "\n" + D.pasted).trim(); }
-    const r = await api("aiGen", { subject: D.subject, lessonId: D.lessonId, lessonTitle: D.pasted.slice(0, 80), images, text, n: D.n, types: D.types, context: D.context });
+    let images = [], text = D.pasted; const pages = picker.selected();
+    if (pages.length) { const x = await picker.extract(pages, { max: 1000, q: .6 }); images = x.images; text = (x.text + "\n" + D.pasted).trim(); if (x.text.length > 350 * pages.length) images = []; }
+    return { subject: D.subject, lessonId: D.lessonId, lessonTitle: D.pasted.slice(0, 80), images, text, n: D.n, types: D.types, context: D.context };
+  };
+  const manual = $("#manualAI");
+  if (manual) {
+    $("#mCopy").onclick = e => busy(e.currentTarget, async () => {
+      const p = await genParams(); p.images = []; const r = await api("aiPrompt", p);
+      let ok = false; try { await navigator.clipboard.writeText(r.prompt); ok = true; } catch (x) {}
+      if (!ok) { $("#mBox").style.display = "block"; $("#mBox").value = r.prompt; $("#mBox").select(); toast("Cô bấm Ctrl + C để sao chép ô bên dưới."); } else toast("Đã sao chép. Cô mở Gemini và dán vào (Ctrl + V).");
+      $("#mStep2").classList.remove("hidden");
+    }, "Đang chuẩn bị…");
+    $("#mUse").onclick = e => busy(e.currentTarget, async () => {
+      const r = await api("aiParse", { text: $("#mAns").value, lessonId: D.lessonId });
+      D.questions = D.questions.concat(r.questions); if (!D.title) D.title = "Luyện tập: " + (lessonName(D.lessonId) || "bài mới");
+      $("#mAns").value = ""; toast(`Đã nhận ${r.questions.length} câu. Cô đọc kĩ, sửa nếu cần rồi giao bài.`); drawQEdit(); $("#qEdit").scrollIntoView({ behavior: "smooth" });
+    }, "Đang đọc…");
+  }
+  $("#gen").onclick = e => busy(e.currentTarget, async () => {
+    const r = await api("aiGen", await genParams());
     D.questions = D.questions.concat(r.questions);
     if (!D.title) D.title = "Luyện tập: " + (lessonName(D.lessonId) || "bài mới");
     toast(`AI đã soạn ${r.questions.length} câu. Cô đọc kĩ, sửa nếu cần rồi giao bài.`); drawQEdit(); $("#qEdit").scrollIntoView({ behavior: "smooth" });
